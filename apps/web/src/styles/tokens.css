@@ -1,0 +1,51 @@
+/* Jetons de design : couleurs, espaces, rayons et ombres (thème clair par défaut). */
+:root {
+  --bg: #f4f6fb;
+  --bg-accent: radial-gradient(1200px 600px at 12% -10%, rgba(79, 124, 255, 0.14), transparent 60%),
+    radial-gradient(900px 500px at 92% 0%, rgba(34, 184, 160, 0.12), transparent 55%);
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef2f9;
+  --border: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --text: #0d1526;
+  --text-soft: #334155;
+  --muted: #6b7a90;
+  --accent: #3f5df5;
+  --accent-soft: rgba(63, 93, 245, 0.12);
+  --pos: #0f9d76;
+  --neg: #e0424d;
+  --warn: #d98a0b;
+  --info: #2f7de1;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.35);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+  --space: 16px;
+  --gap: 18px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+:root[data-theme='dark'] {
+  --bg: #070c17;
+  --bg-accent: radial-gradient(1200px 600px at 10% -10%, rgba(79, 124, 255, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 90% 0%, rgba(34, 184, 160, 0.14), transparent 55%);
+  --surface: #101a2e;
+  --surface-2: #0c1526;
+  --surface-3: #16223a;
+  --border: rgba(148, 176, 224, 0.14);
+  --border-strong: rgba(148, 176, 224, 0.26);
+  --text: #e9eefb;
+  --text-soft: #c3cde3;
+  --muted: #8d9db8;
+  --accent: #6b8cff;
+  --accent-soft: rgba(107, 140, 255, 0.18);
+  --pos: #35c69b;
+  --neg: #ff6b74;
+  --warn: #f0b344;
+  --info: #63a8ff;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+}

@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# SuiviInvest — déploiement de production (auto-hébergement VPS).
+#
+#   docker compose up -d
+#
+# Les données sont dans des volumes nommés : `docker compose down -v` les
+# SUPPRIME. Pour repartir de zéro sans perdre les données, utilisez
+# `docker compose down` (sans -v).
+# ---------------------------------------------------------------------------
+
+services:
+  suiviinvest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: suiviinvest:latest
+    container_name: suiviinvest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      SUIVIINVEST_DB: /data/suiviinvest.db
+      SUIVIINVEST_BACKUP_DIR: /backups
+      SUIVIINVEST_WEB_DIR: /app/web
+    ports:
+      # En production derrière un reverse proxy, préférez :
+      #   - "127.0.0.1:9123:9123"
+      - "9123:9123"
+    volumes:
+      - suiviinvest-data:/data
+      - suiviinvest-backups:/backups
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:9123/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  suiviinvest-data:
+    name: suiviinvest-data
+  suiviinvest-backups:
+    name: suiviinvest-backups

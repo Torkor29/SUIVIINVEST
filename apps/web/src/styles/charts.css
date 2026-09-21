@@ -1,0 +1,143 @@
+/* Graphiques SVG faits main (courbe, donut, barres). */
+.chart-svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.chart-line {
+  position: relative;
+}
+
+.chart-area {
+  opacity: 0.9;
+}
+
+.chart-fill-top {
+  stop-color: var(--accent);
+  stop-opacity: 0.28;
+}
+
+.chart-fill-bottom {
+  stop-color: var(--accent);
+  stop-opacity: 0;
+}
+
+.chart-line-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-axis-label {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.chart-cursor {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-dot {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-xaxis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  pointer-events: none;
+}
+
+.chart-tooltip-bar {
+  top: auto;
+  bottom: 6px;
+}
+
+.chart-tooltip-date {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.chart-empty {
+  padding: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.chart-donut {
+  display: flex;
+  justify-content: center;
+}
+
+.donut-segment {
+  transition: opacity 0.15s ease;
+  cursor: default;
+}
+
+.donut-segment.is-active {
+  opacity: 0.72;
+}
+
+.donut-center-label {
+  fill: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.donut-center-value {
+  fill: var(--text);
+  font-size: 15px;
+  font-weight: 660;
+}
+
+.chart-bar-wrap {
+  position: relative;
+}
+
+.bar {
+  transition: opacity 0.15s ease;
+}
+
+.bar.is-active {
+  opacity: 0.72;
+}
+
+.sparkline {
+  width: 100%;
+}

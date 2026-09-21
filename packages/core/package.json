@@ -1,0 +1,14 @@
+{
+  "name": "@suiviinvest/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Domaine métier pur : monnaie, positions/PRU, performance, immobilier, patrimoine, déduplication.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

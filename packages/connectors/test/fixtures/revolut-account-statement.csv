@@ -1,0 +1,9 @@
+Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance
+Card Payment,Current,2026-03-01 10:00:00,2026-03-02 09:00:00,Exemple Café,-12.75,0.00,EUR,COMPLETED,500.00
+Topup,Current,2026-03-03 08:00:00,2026-03-03 08:00:00,Top-up,200.00,0.00,EUR,COMPLETED,700.00
+Transfer,Current,2026-03-04 12:00:00,2026-03-04 12:00:00,To Exemple Ami,-50.00,0.00,EUR,COMPLETED,650.00
+Transfer,Current,2026-03-05 12:00:00,2026-03-05 12:00:00,From Exemple Ami,25.00,0.00,EUR,COMPLETED,675.00
+Interest,Current,2026-03-31 23:59:00,2026-04-01 00:00:00,Interest on savings,1.23,0.00,EUR,COMPLETED,676.23
+Cashback,Current,2026-04-02 10:00:00,2026-04-02 10:00:00,Cashback on card,0.50,0.00,EUR,COMPLETED,676.73
+Card Payment,Current,2026-04-03 10:00:00,2026-04-03 10:00:00,Exemple Librairie,-19.99,0.00,EUR,PENDING,656.74
+Fee,Current,2026-04-04 10:00:00,2026-04-04 10:00:00,Card delivery fee,-5.00,0.00,EUR,COMPLETED,651.74

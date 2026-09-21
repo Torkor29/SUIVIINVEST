@@ -1,0 +1,30 @@
+# Dépendances
+node_modules/
+.pnpm-store/
+
+# Secrets et configuration locale — JAMAIS commités
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+deploy/nginx/*.conf.local
+
+# Données locales (base SQLite, sauvegardes)
+data/
+*.db
+*.db-wal
+*.db-shm
+backups/
+
+# Artefacts de build
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Logs et temporaires
+*.log
+logs/
+.DS_Store
+tmp/

@@ -1,0 +1,5 @@
+Code ISIN;Valeur;Quantité;Cours;Devise;Nature
+FR0000000001;Exemple Monde Actions ETF;42;97,42;EUR;ETF
+US0000000003;Exemple Quantique;17;21,50;USD;Action
+FR0000000004;Exemple Obligations Souveraines;100;101,20;EUR;Obligation
+FR0000000005;Exemple Fonds Monétaire;25;1000,00;EUR;OPCVM

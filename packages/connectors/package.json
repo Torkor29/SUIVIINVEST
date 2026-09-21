@@ -1,0 +1,17 @@
+{
+  "name": "@suiviinvest/connectors",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Connecteurs read-only (DEGIRO, Trade Republic, Crédit Agricole, Revolut, wallets EVM) + moteur d'import CSV.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@suiviinvest/core": "*"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

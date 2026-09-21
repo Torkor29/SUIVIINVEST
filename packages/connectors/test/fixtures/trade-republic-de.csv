@@ -1,0 +1,7 @@
+Datum;Typ;Wert;Notiz;ISIN;Stück;Gebühren;Steuern;ISIN2;Stück2
+2024-02-20T16:32:07;Kauf;-3.002,8;Exemple Europe 50 EUR (Dist);FR0000000001;60;1;;;
+2024-06-03T17:07:26;Einlage;200;Exemple Titulaire;;;;;;;
+2024-06-26T08:06:40;Split;0;Exemple Action Scindée;US0000000002;49;;;;;
+2025-03-14T07:03:14;Verkauf;94,76;Exemple Quantique;US0000000003;17;1;3,18;;
+2025-10-23T14:19:56;Dividende;2,24;Exemple Média (A);US0000000004;10,640298;;0,78;;
+2025-11-02T09:00:00;Zinsen;0,42;Intérêts espèces;;;;;;;

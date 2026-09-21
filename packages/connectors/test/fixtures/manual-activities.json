@@ -1,0 +1,28 @@
+{
+  "account": {
+    "externalAccountId": "manual-immobilier",
+    "name": "Exemple Appartement",
+    "type": "REAL_ESTATE",
+    "currency": "EUR"
+  },
+  "activities": [
+    { "date": "2026-01-05", "type": "RENT", "description": "Loyer janvier", "amount": 850.0, "currency": "EUR" },
+    {
+      "date": "2026-01-10",
+      "type": "REAL_ESTATE_EXPENSE",
+      "description": "Charges copropriété",
+      "amount": -120.0,
+      "currency": "EUR"
+    },
+    { "date": "2026-02-01", "type": "DEPOSIT", "description": "Apport", "amount": 1000.0 }
+  ],
+  "positions": [
+    {
+      "name": "Exemple Appartement",
+      "kind": "REAL_ESTATE",
+      "quantity": 1,
+      "unitPrice": 240000,
+      "currency": "EUR"
+    }
+  ]
+}

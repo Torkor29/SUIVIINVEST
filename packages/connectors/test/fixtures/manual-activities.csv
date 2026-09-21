@@ -1,0 +1,5 @@
+date,type,account,description,isin,symbol,name,quantity,unit_price,amount,currency,fees,taxes,kind,external_transaction_id
+2026-01-15,BUY,manual-pea,Achat Exemple Monde,FR0000000001,,Exemple Monde,10,100.50,-1005.00,EUR,1.25,0,,tx-001
+2026-02-01,DIVIDEND,manual-pea,Dividende Exemple Monde,FR0000000001,,,,,12.50,EUR,0,2.50,,
+2026-02-10,POSITION,manual-pea,Position Exemple Monde,FR0000000001,,Exemple Monde,10,101.00,,,,,ETF,
+2026-03-01,DEPOSIT,manual-livret,Versement livret,,,,,,1500.00,EUR,0,0,,

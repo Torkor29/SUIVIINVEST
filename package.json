@@ -1,0 +1,36 @@
+{
+  "name": "suiviinvest",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tableau de bord de patrimoine personnel (read-only) — actions, ETF, crypto, banque, immobilier, crédits.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "node --test packages/core/test/*.test.ts packages/connectors/test/*.test.ts apps/api/test/*.test.ts",
+    "test:core": "node --test packages/core/test/*.test.ts",
+    "test:connectors": "node --test packages/connectors/test/*.test.ts",
+    "test:api": "node --test apps/api/test/*.test.ts",
+    "test:web": "npm --workspace @suiviinvest/web run test",
+    "dev:api": "node --watch apps/api/src/server.ts",
+    "dev:web": "npm --workspace @suiviinvest/web run dev",
+    "start": "node apps/api/src/server.ts",
+    "lint": "eslint . --max-warnings 0",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1"
+  }
+}

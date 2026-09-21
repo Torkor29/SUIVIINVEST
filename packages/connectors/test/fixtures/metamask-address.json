@@ -1,0 +1,46 @@
+{
+  "address": "0x1111111111111111111111111111111111111111",
+  "chain": "ethereum",
+  "nativeBalance": 1.2345,
+  "tokens": [
+    {
+      "contractAddress": "0x2222222222222222222222222222222222222222",
+      "symbol": "USDC",
+      "name": "Exemple USD Coin",
+      "decimals": 6,
+      "quantity": 100.5
+    },
+    {
+      "contractAddress": "0x3333333333333333333333333333333333333333",
+      "symbol": "WETH",
+      "name": "Exemple Wrapped Ether",
+      "decimals": 18,
+      "quantity": 0.75
+    }
+  ],
+  "transactions": [
+    {
+      "externalTransactionId": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0",
+      "date": "2026-03-02",
+      "type": "CRYPTO_TRANSFER",
+      "direction": "IN",
+      "symbol": "USDC",
+      "contractAddress": "0x2222222222222222222222222222222222222222",
+      "decimals": 6,
+      "quantity": 100.5,
+      "currency": "USDC",
+      "description": "Réception USDC"
+    },
+    {
+      "externalTransactionId": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:1",
+      "date": "2026-03-05",
+      "direction": "OUT",
+      "symbol": "WETH",
+      "contractAddress": "0x3333333333333333333333333333333333333333",
+      "decimals": 18,
+      "quantity": 0.25,
+      "currency": "WETH",
+      "description": "Envoi WETH"
+    }
+  ]
+}

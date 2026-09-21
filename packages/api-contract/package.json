@@ -1,0 +1,10 @@
+{
+  "name": "@suiviinvest/api-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Types DTO partagés entre l'API et le frontend (source de vérité des échanges HTTP).",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,142 @@
+import { computePositions, round, sum, WEALTH_CLASSES } from '@suiviinvest/core';
+import type { AllocationSlice, CryptoResponse, CryptoWalletDto, PeriodKey } from '@suiviinvest/api-contract';
+import type { Db } from '../db/database.ts';
+import { AccountRepository, InstrumentRepository } from '../repositories/accounts.ts';
+import { ActivityRepository, toDomainActivity } from '../repositories/activities.ts';
+import { MarketRepository } from '../repositories/market.ts';
+
+/**
+ * Vue crypto.
+ *
+ * Aucune clé privée, aucune seed, aucune signature : un wallet est identifié par
+ * son adresse publique, et le suivi fonctionne sans connexion permanente à
+ * MetaMask. Toutes les données viennent des activités déjà ingérées (transactions
+ * on-chain normalisées) et des cours du module market data.
+ *
+ * ⚠️ Le suivi par adresse seule ne voit que ce qui a été synchronisé : si un
+ * indexer n'est pas configuré, le wallet apparaît avec un historique partiel —
+ * l'avertissement correspondant est renvoyé à l'interface.
+ */
+export class CryptoService {
+  readonly #accounts: AccountRepository;
+  readonly #instruments: InstrumentRepository;
+  readonly #activities: ActivityRepository;
+  readonly #market: MarketRepository;
+
+  constructor(db: Db, options: { baseCurrency: string }) {
+    this.#accounts = new AccountRepository(db);
+    this.#instruments = new InstrumentRepository(db);
+    this.#activities = new ActivityRepository(db);
+    this.#market = new MarketRepository(db);
+    void options.baseCurrency;
+  }
+
+  crypto(): CryptoResponse {
+    const latestQuotes = this.#market.latestQuotes();
+    const wallets: CryptoWalletDto[] = [];
+    const warnings: string[] = [];
+
+    for (const account of this.#accounts.list()) {
+      if (account.type !== 'CRYPTO') continue;
+      const rows = this.#activities.listForAccount(account.id);
+      if (rows.length === 0) {
+        wallets.push({
+          accountId: account.id,
+          name: account.name,
+          address: account.external_account_id ?? '—',
+          chains: [],
+          valueEur: 0,
+          assets: [],
+          lastSyncedAt: null,
+        });
+        warnings.push(
+          `Wallet « ${account.name} » sans activité : lancez une synchronisation pour récupérer son contenu.`,
+        );
+        continue;
+      }
+
+      const domain = rows.map((row) => toDomainActivity(row, account.currency));
+      const lastPrices: Record<string, number> = {};
+      for (const activity of domain) {
+        if (!activity.instrumentId) continue;
+        const quote = latestQuotes.get(activity.instrumentId);
+        if (quote) lastPrices[activity.instrumentId] = quote.close;
+      }
+      const calc = computePositions({ activities: domain, lastPrices, currency: account.currency });
+
+      const assets = calc.positions
+        .filter((position) => position.quantity > 0)
+        .map((position) => {
+          const instrument = position.instrumentId ? this.#instruments.get(position.instrumentId) : null;
+          return {
+            chain: instrument?.chain ?? 'unknown',
+            symbol: instrument?.symbol ?? '—',
+            name: instrument?.name ?? position.instrumentId,
+            contractAddress: instrument?.contract_address ?? null,
+            quantity: position.quantity,
+            price: position.lastPrice,
+            currency: account.currency,
+            valueEur: round(position.marketValue),
+            isNative: instrument?.contract_address === null,
+            _chains: instrument?.chain ?? 'unknown',
+          };
+        });
+
+      const chains = [...new Set(assets.map((asset) => asset.chain))];
+      for (const asset of assets) {
+        if (asset.price === null) {
+          warnings.push(
+            `Prix indisponible pour ${asset.symbol} : valorisé au coût de revient (approximation signalée).`,
+          );
+        }
+      }
+
+      wallets.push({
+        accountId: account.id,
+        name: account.name,
+        address: account.external_account_id ?? '—',
+        chains,
+        valueEur: round(sum(assets.map((asset) => asset.valueEur))),
+        assets: assets.map(({ _chains, ...asset }) => asset),
+        lastSyncedAt: rows.reduce<string | null>(
+          (latest, row) => (!latest || row.last_synced_at > latest ? row.last_synced_at : latest),
+          null,
+        ),
+      });
+    }
+
+    const total = round(sum(wallets.map((wallet) => wallet.valueEur)));
+    const byChainMap = new Map<string, number>();
+    for (const wallet of wallets) {
+      for (const asset of wallet.assets) {
+        byChainMap.set(asset.chain, round((byChainMap.get(asset.chain) ?? 0) + asset.valueEur));
+      }
+    }
+
+    return {
+      wallets: wallets.sort((a, b) => b.valueEur - a.valueEur),
+      totalEur: total,
+      allocation: this.#slices(
+        wallets.flatMap((wallet) => wallet.assets.map((asset) => ({ key: asset.symbol, value: asset.valueEur }))),
+      ),
+      byChain: this.#slices([...byChainMap.entries()].map(([key, value]) => ({ key, value }))),
+      warnings,
+    };
+  }
+
+  #slices(items: readonly { key: string; value: number }[]): AllocationSlice[] {
+    const map = new Map<string, number>();
+    for (const item of items) map.set(item.key, round((map.get(item.key) ?? 0) + item.value));
+    const total = sum([...map.values()].map((value) => Math.abs(value)));
+    return [...map.entries()]
+      .map(([key, value]) => ({
+        key,
+        label: key,
+        value,
+        percent: total > 0 ? round((Math.abs(value) / total) * 100, 2) : 0,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }
+}
+
+export { WEALTH_CLASSES, type PeriodKey };
