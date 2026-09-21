@@ -40,9 +40,15 @@ async function main(): Promise<void> {
     enabled: config.schedulerEnabled,
     syncCron: config.schedulerCron,
     backupCron: config.backupCron,
+    snapshotCron: config.snapshotCron,
     logger,
     sync: built.sync,
     backup: built.backup,
+    // Le relevé quotidien est enregistré par l'application : il est marqué
+    // `RECORDED`, par opposition à l'historique reconstruit depuis les activités.
+    snapshots: {
+      recordDailySnapshot: () => built.portfolio.recordDailySnapshot(),
+    },
   });
   scheduler.start();
   schedulerState.current = scheduler;

@@ -41,6 +41,13 @@ export interface SyncServiceOptions {
   /** Chevauchement de la fenêtre incrémentale, en jours. */
   readonly overlapDays?: number;
   readonly logger: Logger;
+  /**
+   * Clés d'API venues de l'environnement (`SUIVIINVEST_KEY_<NOM>`), utilisées en
+   * repli quand aucun secret n'a été saisi dans l'interface pour cette connexion.
+   */
+  readonly integrationKeys?: Readonly<Record<string, string>>;
+  /** Sidecars disponibles (DEGIRO, Trade Republic...), injectés pour être simulables en test. */
+  readonly sidecars?: Readonly<Record<string, import('@suiviinvest/connectors').SidecarTransport>>;
 }
 
 export interface SyncOutcome {
@@ -52,9 +59,56 @@ export interface SyncOutcome {
   readonly updated: number;
   readonly skipped: number;
   readonly errors: number;
+  /** Message court, compréhensible par l'utilisateur (jamais une trace technique). */
   readonly message: string | null;
+  /** Code d'erreur normalisé, `null` en cas de succès. */
+  readonly errorCode: string | null;
+  /** Consigne actionnable associée à l'erreur (« Validez dans l'application... »). */
+  readonly userAction: string | null;
   readonly durationMs: number;
   readonly warnings: readonly string[];
+}
+
+/** Traduit un code d'erreur technique en consigne utilisateur, sans jargon. */
+export function userActionFor(errorCode: string | null): string | null {
+  switch (errorCode) {
+    case 'AUTH_REQUIRED':
+      return 'Renseignez vos identifiants pour cette source, puis relancez la synchronisation.';
+    case 'MFA_REQUIRED':
+      return 'Validez la connexion dans l\'application du fournisseur, puis relancez la synchronisation.';
+    case 'SESSION_EXPIRED':
+      return 'Votre session a expiré : reconnectez-vous à cette source.';
+    case 'RATE_LIMITED':
+      return 'Le fournisseur limite temporairement les accès : réessayez dans quelques minutes.';
+    case 'PROVIDER_DOWN':
+      return 'Le service du fournisseur est injoignable : réessayez plus tard.';
+    case 'PROVIDER_BROKEN':
+      return 'Le format du fournisseur a changé : utilisez l\'import de fichier en attendant une mise à jour.';
+    case 'NOT_SUPPORTED':
+      return 'Cette source fonctionne par import de fichier : utilisez « Importer un fichier ».';
+    case 'NETWORK':
+      return 'Problème réseau de votre côté : vérifiez votre connexion.';
+    case 'DATA':
+      return 'Certaines données du fournisseur sont inexploitables : consultez le détail.';
+    case 'SYNC_ERROR':
+      return 'La synchronisation a échoué : consultez le détail et relancez.';
+    default:
+      return null;
+  }
+}
+
+/** Libellé court d'un résultat de synchronisation, prêt à afficher. */
+export function labelFor(status: SyncOutcome['status']): string {
+  switch (status) {
+    case 'SUCCESS':
+      return 'Synchronisé';
+    case 'PARTIAL':
+      return 'Synchronisé avec avertissements';
+    case 'AUTH_REQUIRED':
+      return 'Validation requise';
+    default:
+      return 'Échec';
+  }
 }
 
 export interface SyncConnectionDto {
@@ -175,8 +229,9 @@ export class SyncService {
         report,
         report.warnings.length
           ? `${report.warnings.length} avertissement(s) — voir le détail`
-          : null,
+          : `${report.created} ajout(s), ${report.updated} mise(s) à jour`,
         { warnings: report.warnings.slice(0, 50), cursor: transactions.cursor.value },
+        null,
       );
       this.#connections.updateStatus(connectionId, 'SYNCED', {
         lastError: null,
@@ -205,22 +260,27 @@ export class SyncService {
         skipped: report.skipped,
         errors: report.errors,
         message: report.warnings.length ? `${report.warnings.length} avertissement(s)` : null,
+        errorCode: null,
+        userAction: null,
         durationMs,
         warnings: report.warnings,
       };
     } catch (error) {
-      const kind = error instanceof ConnectorError ? error.kind : 'DATA';
+      const connectorError = error instanceof ConnectorError ? error : null;
+      const kind = connectorError?.kind ?? 'DATA';
       const status =
-        kind === 'AUTH_REQUIRED' || kind === 'MFA_REQUIRED'
-          ? 'AUTH_REQUIRED'
-          : ('FAILED' as 'FAILED' | 'AUTH_REQUIRED');
-      const message =
-        error instanceof ConnectorError
+        kind === 'AUTH_REQUIRED' || kind === 'MFA_REQUIRED' || kind === 'SESSION_EXPIRED'
+          ? ('AUTH_REQUIRED' as const)
+          : ('FAILED' as const);
+      // Le message d'erreur technique n'est PAS renvoyé tel quel : il part dans les
+      // logs, l'interface reçoit un message court + une consigne actionnable.
+      const technical = connectorError
+        ? connectorError.message
+        : error instanceof Error
           ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'erreur inconnue';
-      return this.#fail(syncRunId, connection, status, message, startedAt, 0);
+          : 'erreur inconnue';
+      const friendly = describeError(kind);
+      return this.#fail(syncRunId, connection, status, friendly, startedAt, 0, kind, technical);
     }
   }
 
@@ -261,16 +321,28 @@ export class SyncService {
   #buildContext(connection: ConnectionRow, connector: Connector, syncRunId: string): ConnectorContext {
     const secrets = this.#secrets;
     const prefix = `${connection.id}:`;
+    const envKeys = this.#options.integrationKeys ?? {};
     return {
       connectionId: connection.id,
       syncRunId,
       config: parseJson<Record<string, string>>(connection.config_json, {}),
       secrets: {
-        get: (name: string) => secrets.get(`${prefix}${name}`),
+        /**
+         * Résolution d'un secret par nom logique :
+         *   1. secret saisi dans l'interface pour CETTE connexion (chiffré en base) ;
+         *   2. clé d'API fournie par l'environnement (`SUIVIINVEST_KEY_<NOM>`).
+         * La valeur n'est jamais journalisée ni renvoyée par l'API.
+         */
+        get: async (name: string) => {
+          const stored = await secrets.get(`${prefix}${name}`);
+          if (stored !== null) return stored;
+          return envKeys[name.toLowerCase()] ?? null;
+        },
       },
       http: new FetchHttpClient({ providerId: connector.id }),
       logger: this.#options.logger,
       now: () => new Date(),
+      ...(this.#options.sidecars ? { sidecars: this.#options.sidecars } : {}),
     };
   }
 
@@ -290,17 +362,29 @@ export class SyncService {
     message: string,
     startedAt: number,
     errors: number,
+    errorCode: string | null = null,
+    technical?: string,
   ): SyncOutcome {
-    this.#runs.finish(syncRunId, status, { created: 0, updated: 0, skipped: 0, errors: errors || 1 }, message);
+    this.#runs.finish(
+      syncRunId,
+      status,
+      { created: 0, updated: 0, skipped: 0, errors: errors || 1 },
+      message,
+      technical ? { technical: technical.slice(0, 500) } : undefined,
+      errorCode,
+    );
     this.#connections.updateStatus(connection.id, status === 'FAILED' ? 'ERROR' : 'AUTH_REQUIRED', {
+      // On stocke le message utilisateur : l'interface ne montre jamais la trace brute.
       lastError: message,
       requiresUserAction: status === 'AUTH_REQUIRED',
     });
+    // La cause technique est journalisée côté serveur uniquement.
     this.#options.logger.error('Synchronisation en échec', {
       syncRunId,
       provider: connection.provider_id,
       status,
-      message,
+      errorCode,
+      cause: technical ?? message,
     });
     return {
       syncRunId,
@@ -312,9 +396,39 @@ export class SyncService {
       skipped: 0,
       errors: errors || 1,
       message,
+      errorCode,
+      userAction: userActionFor(errorCode),
       durationMs: Date.now() - startedAt,
       warnings: [],
     };
+  }
+}
+
+/** Message court présenté à l'utilisateur, dérivé du code d'erreur normalisé. */
+function describeError(kind: string): string {
+  switch (kind) {
+    case 'AUTH_REQUIRED':
+      return 'Identifiants requis ou refusés par le fournisseur.';
+    case 'MFA_REQUIRED':
+      return 'Une validation de votre part est nécessaire chez le fournisseur.';
+    case 'SESSION_EXPIRED':
+      return 'Session expirée chez le fournisseur.';
+    case 'RATE_LIMITED':
+      return 'Accès temporairement limité par le fournisseur.';
+    case 'PROVIDER_DOWN':
+      return 'Service du fournisseur injoignable.';
+    case 'PROVIDER_BROKEN':
+      return 'Le format ou le comportement du fournisseur a changé.';
+    case 'NOT_SUPPORTED':
+      return 'Cette source n\'est pas disponible en automatique.';
+    case 'NETWORK':
+      return 'Problème réseau pendant la synchronisation.';
+    case 'DATA':
+      return 'Données du fournisseur inexploitables.';
+    case 'SYNC_ERROR':
+      return 'La synchronisation a échoué.';
+    default:
+      return 'La synchronisation a échoué.';
   }
 }
 

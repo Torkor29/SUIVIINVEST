@@ -16,6 +16,9 @@ export interface SchedulerOptions {
   readonly enabled: boolean;
   readonly syncCron: string;
   readonly backupCron: string;
+  /** Relevé quotidien du patrimoine : une fois par jour, valeur totale et par compte. */
+  readonly snapshotCron: string;
+  readonly snapshots: { recordDailySnapshot(): { date: string; total: number; accounts: number } };
   readonly logger: Logger;
   readonly sync: SyncService;
   readonly backup: BackupService;
@@ -33,6 +36,7 @@ export class Scheduler implements SchedulerState {
   readonly #options: SchedulerOptions;
   #syncJob: Cron | null = null;
   #backupJob: Cron | null = null;
+  #snapshotJob: Cron | null = null;
   #lastRunAt: string | null = null;
 
   constructor(options: SchedulerOptions) {
@@ -82,11 +86,23 @@ export class Scheduler implements SchedulerState {
       }
     });
 
+    this.#snapshotJob = new Cron(this.#options.snapshotCron, { protect: true }, () => {
+      try {
+        const result = this.#options.snapshots.recordDailySnapshot();
+        logger.info('Relevé de patrimoine enregistré', result);
+      } catch (error) {
+        logger.error('Relevé de patrimoine en échec', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+
     logger.info('Ordonnanceur démarré', {
       syncCron: this.#options.syncCron,
       backupCron: this.#options.backupCron,
       nextSync: this.#syncJob.nextRun()?.toISOString() ?? null,
       nextBackup: this.#backupJob.nextRun()?.toISOString() ?? null,
+      nextSnapshot: this.#snapshotJob.nextRun()?.toISOString() ?? null,
     });
   }
 
@@ -110,7 +126,9 @@ export class Scheduler implements SchedulerState {
   stop(): void {
     this.#syncJob?.stop();
     this.#backupJob?.stop();
+    this.#snapshotJob?.stop();
     this.#syncJob = null;
     this.#backupJob = null;
+    this.#snapshotJob = null;
   }
 }

@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import type { PeriodKey } from '@suiviinvest/api-contract';
+import type { AccountDto, PeriodKey } from '@suiviinvest/api-contract';
 import type { Db } from '../db/database.ts';
-import { AccountRepository } from '../repositories/accounts.ts';
+import { AccountRepository, type AccountRow } from '../repositories/accounts.ts';
 import { ActivityRepository, ValuationRepository } from '../repositories/activities.ts';
 import type { PropertyRepository } from '../repositories/properties.ts';
 import type { CryptoService } from '../services/crypto.ts';
@@ -15,6 +15,27 @@ import { sendError } from './auth.ts';
  * des comptes et des biens). Aucune route de cette application ne permet de
  * passer un ordre, de virer des fonds ou de signer une transaction.
  */
+
+/**
+ * Convertit une ligne SQL (snake_case) en DTO (camelCase).
+ * Aucune ligne brute ne doit atteindre le client : cela évite de figer les noms
+ * de colonnes dans le contrat et de fuiter des champs internes.
+ */
+function toAccountDto(row: AccountRow): AccountDto {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    providerId: row.provider_id,
+    currency: row.currency,
+    initialBalance: row.initial_balance,
+    isActive: row.is_active === 1,
+    externalAccountId: row.external_account_id,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 export interface WealthRoutesDeps {
   readonly db: Db;
@@ -125,7 +146,7 @@ export async function registerWealthRoutes(app: FastifyInstance, deps: WealthRou
       initialBalance: parsed.data.initialBalance ?? 0,
       notes: parsed.data.notes ?? null,
     });
-    return reply.code(201).send(account);
+    return reply.code(201).send(toAccountDto(account));
   });
 
   app.patch('/api/accounts/:id', async (request, reply) => {
@@ -141,7 +162,7 @@ export async function registerWealthRoutes(app: FastifyInstance, deps: WealthRou
       ...(parsed.data.notes !== undefined ? { notes: parsed.data.notes } : {}),
     });
     if (!updated) return sendError(reply, 404, 'NOT_FOUND', 'Compte introuvable.');
-    return reply.send(updated);
+    return reply.send(toAccountDto(updated));
   });
 
   app.delete('/api/accounts/:id', async (request, reply) => {

@@ -185,7 +185,11 @@ test('une panne DEGIRO n\'empêche pas les autres fournisseurs de se synchronise
   assert.equal(outcomes.length, 2);
   const byProvider = new Map(outcomes.map((outcome) => [outcome.providerId, outcome]));
   assert.equal(byProvider.get('degiro')?.status, 'FAILED');
-  assert.match(byProvider.get('degiro')?.message ?? '', /endpoint modifié/);
+  // L'utilisateur reçoit un message compréhensible + un code normalisé ;
+  // la cause technique reste dans les logs et le détail du run.
+  assert.equal(byProvider.get('degiro')?.errorCode, 'PROVIDER_BROKEN');
+  assert.match(byProvider.get('degiro')?.message ?? '', /format|comportement/i);
+  assert.ok(byProvider.get('degiro')?.userAction, 'une consigne actionnable est fournie');
   assert.equal(byProvider.get('trade_republic')?.status, 'SUCCESS');
   assert.equal(byProvider.get('trade_republic')?.created, 1);
 
@@ -196,6 +200,11 @@ test('une panne DEGIRO n\'empêche pas les autres fournisseurs de se synchronise
   assert.equal(runs.length, 2);
   assert.ok(runs.every((run) => run.sync_run_id.length > 0));
   assert.equal(runs.find((run) => run.provider_id === 'degiro')?.status, 'FAILED');
+  const degiroRun = ctx.db.get<{ error_code: string | null; details_json: string | null }>(
+    "SELECT error_code, details_json FROM sync_runs WHERE provider_id = 'degiro'",
+  );
+  assert.equal(degiroRun?.error_code, 'PROVIDER_BROKEN');
+  assert.match(degiroRun?.details_json ?? '', /endpoint modifié/, 'la cause technique est conservée pour le diagnostic');
   assert.equal(runs.find((run) => run.provider_id === 'trade_republic')?.status, 'SUCCESS');
 
   // Les états de connexion reflètent le résultat, indépendamment l'un de l'autre.

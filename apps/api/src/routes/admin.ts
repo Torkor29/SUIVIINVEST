@@ -1,10 +1,18 @@
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type {
+  AccountDto,
+  AccountOverviewResponse,
+  AuditEntryDto,
+  BackupExportResponse,
   ConnectionDto,
+  ConnectionTestResultDto,
   ConnectionsResponse,
   HealthResponse,
+  OkResponse,
   SettingsDto,
+  SyncAllResponse,
+  SyncOutcomeDto,
 } from '@suiviinvest/api-contract';
 import type { ProviderId } from '@suiviinvest/core';
 import type { ConnectorRegistry, Logger } from '@suiviinvest/connectors';
@@ -15,12 +23,12 @@ import {
   SyncRunRepository,
   AuditRepository,
 } from '../repositories/connections.ts';
-import { AccountRepository } from '../repositories/accounts.ts';
+import { AccountRepository, type AccountRow } from '../repositories/accounts.ts';
 import type { SecretsStore } from '../security/secrets.ts';
 import type { BackupService } from '../services/backup.ts';
 import type { ImportService } from '../services/imports.ts';
 import type { MarketDataService } from '../services/marketdata.ts';
-import type { SyncService } from '../services/sync.ts';
+import { userActionFor, type SyncOutcome, type SyncService } from '../services/sync.ts';
 import { ARGON2_DESCRIPTION } from '../security/password.ts';
 import { sendError } from './auth.ts';
 
@@ -28,6 +36,41 @@ import { sendError } from './auth.ts';
  * Routes d'administration : connexions, synchronisations, imports, réglages,
  * market data et sauvegardes.
  */
+
+/** Correspondance ligne SQL -> DTO, pour ne jamais exposer de snake_case. */
+function toAccountDto(row: AccountRow): AccountDto {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    providerId: row.provider_id,
+    currency: row.currency,
+    initialBalance: row.initial_balance,
+    isActive: row.is_active === 1,
+    externalAccountId: row.external_account_id,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** Résultat de synchronisation au format du contrat (interface). */
+function toSyncOutcomeDto(outcome: SyncOutcome): SyncOutcomeDto {
+  return {
+    syncRunId: outcome.syncRunId,
+    connectionId: outcome.connectionId,
+    providerId: outcome.providerId,
+    status: outcome.status,
+    created: outcome.created,
+    updated: outcome.updated,
+    skipped: outcome.skipped,
+    errors: outcome.errors,
+    message: outcome.message,
+    errorCode: outcome.errorCode,
+    durationMs: outcome.durationMs,
+    warnings: outcome.warnings,
+  };
+}
 
 export interface AdminRoutesDeps {
   readonly db: Db;
@@ -44,6 +87,7 @@ export interface AdminRoutesDeps {
     baseCurrency: string;
     schedulerEnabled: boolean;
     schedulerCron: string;
+    snapshotCron: string;
     backupCron: string;
     backupDirectory: string;
     backupRetentionDays: number;
@@ -202,7 +246,14 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
     const { id } = z.object({ id: z.string() }).parse(request.params);
     if (!connections.get(id)) return sendError(reply, 404, 'NOT_FOUND', 'Connexion introuvable.');
     const result = await deps.sync.testConnection(id);
-    return reply.send(result);
+    const payload: ConnectionTestResultDto = {
+      ok: result.ok,
+      status: result.status,
+      message: result.message,
+      requiresUserAction: result.requiresUserAction ?? false,
+      userAction: result.ok ? null : userActionFor(result.status === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'SYNC_ERROR'),
+    };
+    return reply.send(payload);
   });
 
   app.post('/api/connections/:id/sync', async (request, reply) => {
@@ -210,13 +261,13 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
     if (!connections.get(id)) return sendError(reply, 404, 'NOT_FOUND', 'Connexion introuvable.');
     const outcome = await deps.sync.syncConnection(id, 'MANUAL');
     const status = outcome.status === 'FAILED' ? 502 : 200;
-    return reply.code(status).send(outcome);
+    return reply.code(status).send(toSyncOutcomeDto(outcome));
   });
 
   app.post('/api/connections/sync-all', async (_request, reply) => {
     const outcomes = await deps.sync.syncAll('MANUAL');
-    return reply.send({
-      results: outcomes,
+    const payload: SyncAllResponse = {
+      results: outcomes.map(toSyncOutcomeDto),
       summary: {
         total: outcomes.length,
         succeeded: outcomes.filter((outcome) => outcome.status === 'SUCCESS').length,
@@ -226,7 +277,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
         created: outcomes.reduce((acc, outcome) => acc + outcome.created, 0),
         updated: outcomes.reduce((acc, outcome) => acc + outcome.updated, 0),
       },
-    });
+    };
+    return reply.send(payload);
   });
 
   app.get('/api/connections/:id/runs', async (request, reply) => {
@@ -247,6 +299,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
         errors: row.errors,
         durationMs: row.duration_ms,
         message: row.message,
+        errorCode: row.error_code ?? null,
       })),
     );
   });
@@ -267,6 +320,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
         errors: row.errors,
         durationMs: row.duration_ms,
         message: row.message,
+        errorCode: row.error_code ?? null,
       })),
     );
   });
@@ -332,6 +386,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
         retentionDays: deps.config.backupRetentionDays,
       },
       scheduler: { enabled: deps.scheduler.isRunning(), cron: deps.config.schedulerCron },
+      snapshotCron: deps.config.snapshotCron,
       security: {
         sessionTtlMinutes: deps.config.sessionTtlMinutes,
         argon2Params: ARGON2_DESCRIPTION,
@@ -348,7 +403,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) return sendError(reply, 400, 'INVALID_REQUEST', 'Réglage invalide.');
     if (parsed.data.theme) deps.settings.set('theme', parsed.data.theme);
-    return reply.send({ ok: true });
+    const payload: OkResponse = { ok: true };
+    return reply.send(payload);
   });
 
   app.post('/api/market-data/refresh', async (request, reply) => {
@@ -364,27 +420,42 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
     const query = z.object({ kind: z.enum(['sqlite', 'json', 'csv', 'all']).optional() }).parse(request.query);
     const files = deps.backup.create(query.kind ?? 'all');
     deps.audit.log({ actor: 'owner', action: 'backup.create', details: { files: files.map((file) => file.name) } });
-    return reply.send({ files, excludedTables: deps.backup.excludedTables });
+    const payload: BackupExportResponse = { files, excludedTables: deps.backup.excludedTables };
+    return reply.send(payload);
   });
 
   app.get('/api/backup/list', async (_request, reply) => reply.send(deps.backup.list()));
 
   app.get('/api/audit', async (request, reply) => {
     const query = z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }).parse(request.query);
-    return reply.send(deps.audit.list(query.limit ?? 200));
+    const entries: AuditEntryDto[] = deps.audit.list(query.limit ?? 200).map((row) => ({
+      at: row.at,
+      actor: row.actor,
+      action: row.action,
+      entity: row.entity,
+      entityId: row.entity_id,
+      details: row.details_json ? safeJson(row.details_json) : null,
+    }));
+    return reply.send(entries);
   });
 
   app.get('/api/accounts/overview', async (_request, reply) => {
     const accounts = new AccountRepository(deps.db).list();
-    return reply.send({ count: accounts.length, accounts });
+    const payload: AccountOverviewResponse = {
+      count: accounts.length,
+      accounts: accounts.map(toAccountDto),
+    };
+    return reply.send(payload);
   });
 
-  app.get('/api/logs/recent', async (_request, reply) => {
-    // Les logs structurés sont écrits sur stdout (voir logger) : ce point
-    // d'entrée expose uniquement les métadonnées de synchronisation récentes,
-    // jamais les secrets ni les données financières brutes.
-    return reply.send({ syncRuns: runs.listRecent(20) });
-  });
+}
+
+function safeJson(json: string): unknown {
+  try {
+    return JSON.parse(json) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function parseConfig(json: string): Record<string, string> {

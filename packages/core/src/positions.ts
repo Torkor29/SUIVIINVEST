@@ -100,6 +100,25 @@ export function computePositions(input: PositionInput): PositionCalculation {
         state.quantity = round(state.quantity + qty);
         break;
       }
+      case 'CRYPTO_TRANSFER': {
+        // Un mouvement on-chain n'est ni un achat ni une vente : le SENS est porté
+        // par le signe du montant (entrant > 0, sortant < 0). Sans cela, les tokens
+        // reçus sur un wallet n'apparaîtraient jamais dans les positions.
+        if (amount > 0) {
+          state.quantity = round(state.quantity + qty);
+          // Coût de revient = valeur au moment de la réception (pas un prix d'achat).
+          state.costBasis = round(state.costBasis + amount);
+        } else {
+          const unitCost = averageCost(state);
+          state.costBasis = round(state.costBasis - qty * unitCost);
+          state.quantity = round(Math.max(0, state.quantity - qty));
+          if (state.quantity <= 1e-9) {
+            state.quantity = 0;
+            state.costBasis = 0;
+          }
+        }
+        break;
+      }
       case 'SELL': {
         if (qty > state.quantity + 1e-9) {
           throw new Error(
@@ -133,9 +152,18 @@ export function computePositions(input: PositionInput): PositionCalculation {
         state.dividends = round(state.dividends + amount);
         break;
       case 'INTEREST':
-      case 'STAKING_REWARD':
         state.interest = round(state.interest + amount);
         break;
+      case 'STAKING_REWARD': {
+        // Un reward de staking est un revenu ET, s'il est versé en token, une
+        // quantité supplémentaire : les deux doivent être enregistrés.
+        state.interest = round(state.interest + amount);
+        if (qty > 0) {
+          state.quantity = round(state.quantity + qty);
+          state.costBasis = round(state.costBasis + Math.max(0, amount));
+        }
+        break;
+      }
       case 'FEE':
       case 'BANK_EXPENSE':
         state.fees = round(state.fees + Math.abs(amount));

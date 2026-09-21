@@ -3,7 +3,12 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
-import { createDefaultRegistry, type ConnectorRegistry, type Logger } from '@suiviinvest/connectors';
+import {
+  ConnectorRegistry,
+  createDefaultRegistry,
+  type ConnectorRegistry as RegistryType,
+  type Logger,
+} from '@suiviinvest/connectors';
 import type { AppConfig } from './config.ts';
 import { Db } from './db/database.ts';
 import { AuditRepository, SettingsRepository } from './repositories/connections.ts';
@@ -22,6 +27,7 @@ import { MarketDataService, type PriceProvider } from './services/marketdata.ts'
 import { PortfolioService } from './services/portfolio.ts';
 import { RealEstateService } from './services/realestate.ts';
 import { SyncService } from './services/sync.ts';
+import { createE2eConnectors } from './testing/e2e-connectors.ts';
 
 /**
  * Assemblage de l'application HTTP.
@@ -42,7 +48,7 @@ export interface AppDeps {
   readonly db: Db;
   readonly config: AppConfig;
   readonly logger?: Logger;
-  readonly registry?: ConnectorRegistry;
+  readonly registry?: RegistryType;
   readonly providers?: readonly PriceProvider[];
   readonly now?: () => Date;
   /**
@@ -73,7 +79,17 @@ export interface BuiltApp {
 export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   const { db, config } = deps;
   const logger = deps.logger ?? createLogger({ level: config.logLevel });
-  const registry = deps.registry ?? createDefaultRegistry();
+  // Connecteurs factices réservés aux tests de bout en bout. Garde explicite :
+  // jamais de doublure en production, même si la variable est mal configurée.
+  const useE2eConnectors = config.e2eConnectors && config.env !== 'production';
+  if (config.e2eConnectors && config.env === 'production') {
+    logger.warn('SUIVIINVEST_E2E_CONNECTORS ignoré en production');
+  }
+  const registry =
+    deps.registry ?? (useE2eConnectors ? new ConnectorRegistry(createE2eConnectors()) : createDefaultRegistry());
+  if (useE2eConnectors) {
+    logger.warn('Connecteurs FACTICES activés (tests de bout en bout) : aucun service réel n\'est contacté');
+  }
 
   const app = Fastify({
     logger: false,
@@ -104,6 +120,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   const sync = new SyncService(db, registry, secrets, {
     baseCurrency: config.baseCurrency,
     logger,
+    integrationKeys: config.integrationKeys,
   });
   const imports = new ImportService(db, { baseCurrency: config.baseCurrency, registry });
   const backup = new BackupService(db, {
@@ -224,6 +241,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       baseCurrency: config.baseCurrency,
       schedulerEnabled: config.schedulerEnabled,
       schedulerCron: config.schedulerCron,
+      snapshotCron: config.snapshotCron,
       backupCron: config.backupCron,
       backupDirectory: config.backupDirectory,
       backupRetentionDays: config.backupRetentionDays,

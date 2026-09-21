@@ -28,11 +28,27 @@ export interface AppConfig {
   readonly schedulerCron: string;
   readonly backupDirectory: string;
   readonly backupCron: string;
+  /** Heure du relevé quotidien du patrimoine (Mission 2 §9). */
+  readonly snapshotCron: string;
   readonly backupRetentionDays: number;
   readonly marketDataProviders: readonly string[];
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error';
   readonly staticDirectory: string | null;
   readonly version: string;
+  /**
+   * Clés d'API de fournisseurs tiers, lues depuis `SUIVIINVEST_KEY_<NOM>`.
+   *
+   * Un connecteur les demande par nom logique : `ctx.secrets.get('etherscan_api_key')`
+   * résout d'abord un secret saisi dans l'interface (chiffré en base), puis cette
+   * table issue de l'environnement. Les clés ne sont donc jamais en base ni en Git,
+   * et restent remplaçables sans redéploiement du code.
+   */
+  readonly integrationKeys: Readonly<Record<string, string>>;
+  /**
+   * Active les connecteurs factices pour les tests de bout en bout.
+   * Refusé en production (garde explicite dans `buildApp`).
+   */
+  readonly e2eConnectors: boolean;
 }
 
 const DEFAULTS = {
@@ -41,6 +57,7 @@ const DEFAULTS = {
   sessionTtlMinutes: 720,
   schedulerCron: '0 */6 * * *',
   backupCron: '30 3 * * *',
+  snapshotCron: '15 0 * * *',
   backupRetentionDays: 30,
   logLevel: 'info' as const,
 };
@@ -65,6 +82,19 @@ function requireInt(value: string | undefined, fallback: number): number {
     throw new Error(`Valeur numérique invalide : ${value}`);
   }
   return parsed;
+}
+
+/** Extrait les clés `SUIVIINVEST_KEY_<NOM>` sans jamais les journaliser. */
+function parseIntegrationKeys(env: NodeJS.ProcessEnv): Record<string, string> {
+  const prefix = 'SUIVIINVEST_KEY_';
+  const keys: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith(prefix) || typeof value !== 'string') continue;
+    const logicalName = name.slice(prefix.length).toLowerCase();
+    if (logicalName === '' || value.trim() === '') continue;
+    keys[logicalName] = value.trim();
+  }
+  return keys;
 }
 
 export class ConfigError extends Error {}
@@ -120,11 +150,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     schedulerCron: env.SUIVIINVEST_SCHEDULER_CRON ?? DEFAULTS.schedulerCron,
     backupDirectory,
     backupCron: env.SUIVIINVEST_BACKUP_CRON ?? DEFAULTS.backupCron,
+    snapshotCron: env.SUIVIINVEST_SNAPSHOT_CRON ?? DEFAULTS.snapshotCron,
     backupRetentionDays: requireInt(env.SUIVIINVEST_BACKUP_RETENTION_DAYS, DEFAULTS.backupRetentionDays),
     marketDataProviders: parseList(env.SUIVIINVEST_MARKET_PROVIDERS, ['yahoo', 'coingecko', 'ecb']),
     logLevel: (env.SUIVIINVEST_LOG_LEVEL as AppConfig['logLevel']) ?? DEFAULTS.logLevel,
     staticDirectory,
-    version: env.SUIVIINVEST_VERSION ?? '0.1.0',
+    version: env.SUIVIINVEST_VERSION ?? '0.2.0',
+    integrationKeys: parseIntegrationKeys(env),
+    e2eConnectors: parseBoolean(env.SUIVIINVEST_E2E_CONNECTORS, false),
   };
 }
 
@@ -142,7 +175,11 @@ export function describeConfig(config: AppConfig): Record<string, unknown> {
     masterKey: config.masterKey ? '***' : 'ABSENTE',
     scheduler: config.schedulerEnabled ? config.schedulerCron : 'désactivé',
     backup: `${config.backupDirectory} (${config.backupCron}, rétention ${config.backupRetentionDays} j)`,
+    snapshotCron: config.snapshotCron,
     marketDataProviders: config.marketDataProviders,
+    // Noms des clés présentes, jamais leurs valeurs.
+    integrationKeys: Object.keys(config.integrationKeys).sort(),
+    e2eConnectors: config.e2eConnectors,
     staticDirectory: config.staticDirectory,
     version: config.version,
   };

@@ -299,8 +299,55 @@ CREATE INDEX idx_fx_pair_date ON fx_rates(base, quote, date DESC);
 CREATE INDEX idx_valuations_account_date ON valuations(account_id, date DESC);
 `;
 
+/**
+ * Mission 2 — synchronisation réelle des sources.
+ *
+ *  - `net_worth_snapshots` gagne les dettes, le détail par compte et l'ORIGINE de
+ *    la donnée : `RECORDED` (relevé enregistré par l'application) ou
+ *    `RECONSTRUCTED` (reconstruit depuis les activités). L'interface doit pouvoir
+ *    distinguer les deux, on ne présente jamais un historique reconstruit comme
+ *    une observation réelle.
+ *  - `net_worth_snapshot_accounts` conserve le détail par compte et par classe.
+ *  - `sync_runs.error_code` permet d'afficher un message compréhensible sans
+ *    exposer l'erreur technique (voir `ConnectorError.kind`).
+ *  - `chain_sync_state` mémorise la progression par (connexion, chaîne) : c'est
+ *    ce qui rend la reprise après erreur possible sans re-parcourir tout l'historique.
+ */
+const MISSION2_V4 = `
+ALTER TABLE net_worth_snapshots ADD COLUMN liabilities REAL NOT NULL DEFAULT 0;
+ALTER TABLE net_worth_snapshots ADD COLUMN by_account_json TEXT;
+ALTER TABLE net_worth_snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'RECORDED';
+ALTER TABLE net_worth_snapshots ADD COLUMN positions_count INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE sync_runs ADD COLUMN error_code TEXT;
+
+CREATE TABLE net_worth_snapshot_accounts (
+  snapshot_date  TEXT NOT NULL,
+  account_id     TEXT NOT NULL,
+  provider_id    TEXT NOT NULL,
+  asset_class    TEXT NOT NULL,
+  currency       TEXT NOT NULL,
+  value_original REAL NOT NULL,
+  value_base     REAL NOT NULL,
+  PRIMARY KEY (snapshot_date, account_id)
+);
+CREATE INDEX idx_snapshot_accounts_date ON net_worth_snapshot_accounts(snapshot_date);
+CREATE INDEX idx_snapshot_accounts_provider ON net_worth_snapshot_accounts(provider_id, snapshot_date);
+
+CREATE TABLE chain_sync_state (
+  connection_id TEXT NOT NULL,
+  chain         TEXT NOT NULL,
+  address       TEXT NOT NULL,
+  last_block    INTEGER,
+  last_synced_at TEXT,
+  cursor        TEXT,
+  PRIMARY KEY (connection_id, chain, address)
+);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
   { version: 3, name: 'indexes', statements: [INDEXES_V3] },
+  { version: 4, name: 'mission2_sync_state_and_snapshots', statements: [MISSION2_V4] },
 ];

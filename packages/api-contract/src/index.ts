@@ -48,7 +48,9 @@ export interface SeriesPoint {
 }
 
 export interface VariationDto {
+  /** Variation en unités de la devise du portefeuille (pas en %). */
   readonly absolute: number;
+  /** Variation en POINTS de pourcentage (10 = +10 %), pas en ratio. */
   readonly percent: number;
 }
 
@@ -59,8 +61,19 @@ export interface AllocationSlice {
   readonly percent: number;
 }
 
+export type HistorySource = 'RECONSTRUCTED' | 'RECORDED' | 'MIXED';
+
 export interface NetWorthResponse {
   readonly asOf: string;
+  /**
+   * Origine de la série : `RECONSTRUCTED` (recalculée depuis les activités et les
+   * cours), `RECORDED` (relevés quotidiens enregistrés par l'application depuis
+   * son installation), `MIXED` (les deux). Ne jamais présenter une reconstitution
+   * comme une observation réelle.
+   */
+  readonly historySource: HistorySource;
+  /** Premier jour effectivement enregistré (et non reconstruit), ou `null`. */
+  readonly recordedSince: string | null;
   readonly currency: string;
   readonly total: number;
   readonly variationToday: VariationDto;
@@ -145,11 +158,16 @@ export interface InvestmentsResponse {
 }
 
 export interface PerformanceMetricsDto {
+  /** TWR en POINTS de pourcentage. `null` = non calculable (historique insuffisant). */
   readonly twr: number | null;
+  /** XIRR annualisé en POINTS de pourcentage. `null` = aucune solution trouvée. */
   readonly xirr: number | null;
+  /** Pire baisse depuis un sommet, en POINTS de pourcentage (valeur négative). */
   readonly maxDrawdown: number | null;
+  /** TWR annualisé, en POINTS de pourcentage. */
   readonly annualized: number | null;
   readonly period: PeriodKey;
+  /** Explique pourquoi une métrique est `null` : jamais de valeur inventée. */
   readonly note: string | null;
 }
 
@@ -282,6 +300,150 @@ export interface RealEstateResponse {
   };
 }
 
+/* ------------------------------------------------------------- comptes (CRUD) */
+
+/**
+ * Compte exposé à l'interface, toujours en camelCase : aucune ligne SQL brute
+ * (snake_case) ne doit atteindre le client.
+ */
+export interface AccountDto {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly providerId: string;
+  readonly currency: string;
+  readonly initialBalance: number;
+  readonly isActive: boolean;
+  readonly externalAccountId: string | null;
+  readonly notes: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface CreateAccountRequest {
+  readonly name: string;
+  readonly type: string;
+  readonly providerId: string;
+  readonly currency: string;
+  readonly initialBalance?: number;
+  readonly notes?: string;
+}
+
+export interface UpdateAccountRequest extends Partial<CreateAccountRequest> {
+  readonly isActive?: boolean;
+}
+
+export interface AccountOverviewResponse {
+  readonly count: number;
+  readonly accounts: readonly AccountDto[];
+}
+
+/** Réponse générique pour une opération sans contenu propre. */
+export interface OkResponse {
+  readonly ok: boolean;
+}
+
+export interface CashFlowCreatedResponse {
+  readonly id: string;
+  readonly accountId: string;
+}
+
+/* ------------------------------------------------------- état des connexions */
+
+export interface ConnectionTestResultDto {
+  readonly ok: boolean;
+  readonly status: string;
+  readonly message: string;
+  /** Vrai si une action humaine est attendue (validation dans l'app, captcha...). */
+  readonly requiresUserAction?: boolean;
+  /** Consigne actionnable, en clair, à afficher à l'utilisateur. */
+  readonly userAction?: string | null;
+}
+
+export interface SyncOutcomeDto {
+  readonly syncRunId: string;
+  readonly connectionId: string;
+  readonly providerId: string;
+  readonly status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'AUTH_REQUIRED';
+  readonly created: number;
+  readonly updated: number;
+  readonly skipped: number;
+  readonly errors: number;
+  /** Message compréhensible (jamais une trace technique). */
+  readonly message: string | null;
+  /** Code d'erreur normalisé (`ConnectorError.kind`), `null` si succès. */
+  readonly errorCode: string | null;
+  readonly durationMs: number;
+  /** Avertissements non bloquants (donnée approximée, taux manquant...). */
+  readonly warnings: readonly string[];
+}
+
+export interface SyncAllResponse {
+  readonly results: readonly SyncOutcomeDto[];
+  readonly summary: {
+    readonly total: number;
+    readonly succeeded: number;
+    readonly partial: number;
+    readonly failed: number;
+    readonly authRequired: number;
+    readonly created: number;
+    readonly updated: number;
+  };
+}
+
+/** État d'un wallet EVM tel qu'affiché dans l'interface. */
+export interface WalletChainStatusDto {
+  readonly chain: string;
+  readonly tokens: number;
+  readonly valueEur: number;
+  readonly lastSyncedAt: string | null;
+  readonly lastBlock: number | null;
+  readonly error: string | null;
+}
+
+export interface WalletStatusDto {
+  readonly accountId: string;
+  readonly name: string;
+  readonly address: string;
+  readonly chains: readonly WalletChainStatusDto[];
+  readonly tokenCount: number;
+  readonly valueEur: number;
+  readonly lastSyncedAt: string | null;
+  readonly error: string | null;
+}
+
+export interface WalletResyncResponse {
+  readonly outcome: SyncOutcomeDto;
+  readonly wallet: WalletStatusDto;
+}
+
+/* -------------------------------------------------------------- sauvegardes */
+
+export interface BackupFileDto {
+  readonly name: string;
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly createdAt: string;
+  readonly kind: 'sqlite' | 'json' | 'csv';
+}
+
+export interface BackupExportResponse {
+  readonly files: readonly BackupFileDto[];
+  /** Tables volontairement exclues d'une sauvegarde (secrets, sessions...). */
+  readonly excludedTables: readonly string[];
+}
+
+/* ------------------------------------------------------------------- audit */
+
+export interface AuditEntryDto {
+  readonly at: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly entity: string | null;
+  readonly entityId: string | null;
+  readonly details: unknown;
+}
+
 /* -------------------------------------------------------------- transactions */
 
 export interface TransactionDto {
@@ -401,6 +563,8 @@ export interface ConnectionDto {
 
 export interface SyncRunDto {
   readonly syncRunId: string;
+  /** Code normalisé de l'erreur éventuelle (`AUTH_REQUIRED`, `RATE_LIMITED`...). */
+  readonly errorCode?: string | null;
   readonly providerId: string;
   readonly connectionId: string;
   readonly trigger: 'MANUAL' | 'SCHEDULED' | 'IMPORT';
@@ -518,6 +682,8 @@ export interface SettingsDto {
     readonly retentionDays: number;
   };
   readonly scheduler: { readonly enabled: boolean; readonly cron: string };
+  /** Heure du relevé quotidien du patrimoine (cron). */
+  readonly snapshotCron: string;
   readonly security: {
     readonly sessionTtlMinutes: number;
     readonly argon2Params: string;

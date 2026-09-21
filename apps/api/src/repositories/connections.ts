@@ -121,6 +121,7 @@ export interface SyncRunRow {
   duration_ms: number | null;
   message: string | null;
   details_json: string | null;
+  error_code?: string | null;
 }
 
 export interface SyncRunCounts {
@@ -161,6 +162,8 @@ export class SyncRunRepository {
     counts: SyncRunCounts,
     message: string | null,
     details?: unknown,
+    /** Code d'erreur normalisé (ConnectorError.kind) : sert à l'interface pour un message propre. */
+    errorCode?: string | null,
   ): void {
     const started = this.#db.get<{ started_at: string }>(
       'SELECT started_at FROM sync_runs WHERE sync_run_id = ?',
@@ -170,7 +173,7 @@ export class SyncRunRepository {
     const durationMs = started ? Date.parse(finishedAt) - Date.parse(started.started_at) : null;
     this.#db.run(
       `UPDATE sync_runs SET finished_at = ?, status = ?, created = ?, updated = ?, skipped = ?,
-         errors = ?, duration_ms = ?, message = ?, details_json = ? WHERE sync_run_id = ?`,
+         errors = ?, duration_ms = ?, message = ?, details_json = ?, error_code = ? WHERE sync_run_id = ?`,
       finishedAt,
       status,
       counts.created,
@@ -180,6 +183,7 @@ export class SyncRunRepository {
       durationMs,
       message,
       details ? JSON.stringify(details) : null,
+      errorCode ?? null,
       syncRunId,
     );
   }

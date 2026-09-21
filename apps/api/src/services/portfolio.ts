@@ -64,6 +64,20 @@ import { PropertyRepository } from '../repositories/properties.ts';
  *  - un transfert entre deux comptes internes est neutralisé dans la performance.
  */
 
+/**
+ * Ligne d'un relevé de patrimoine : la valeur d'un compte à une date, dans sa
+ * devise d'origine ET convertie. C'est ce qui permet de répondre plus tard à
+ * « combien valait ce compte le 12 mars » sans rejouer tout l'historique.
+ */
+export interface AccountSnapshotLine {
+  readonly accountId: string;
+  readonly providerId: string;
+  readonly assetClass: string;
+  readonly currency: string;
+  readonly valueOriginal: number;
+  readonly valueBase: number;
+}
+
 export interface PortfolioServiceOptions {
   readonly baseCurrency: string;
 }
@@ -119,7 +133,18 @@ export class PortfolioService {
 
   netWorth(period: PeriodKey = '1Y'): NetWorthResponse {
     const snapshot = this.#snapshot();
-    const points = this.#series(snapshot.today);
+    const reconstructed = this.#series(snapshot.today);
+
+    // Un relevé réellement enregistré fait foi sur une reconstitution : on
+    // recouvre les points reconstruits par les observations de l'application.
+    const recorded = this.#recordedPoints();
+    const points = reconstructed.map((point) =>
+      recorded.has(point.date) ? { ...point, total: recorded.get(point.date) as number } : point,
+    );
+    const recordedSince = recorded.size > 0 ? [...recorded.keys()].sort()[0] ?? null : null;
+    const historySource: 'RECONSTRUCTED' | 'RECORDED' | 'MIXED' =
+      recorded.size === 0 ? 'RECONSTRUCTED' : reconstructed.length > recorded.size ? 'MIXED' : 'RECORDED';
+
     const summary = buildSummary(points, this.#baseCurrency);
 
     const firstDate = points[0]?.date ?? snapshot.today;
@@ -139,6 +164,8 @@ export class PortfolioService {
 
     return {
       asOf: snapshot.today,
+      historySource,
+      recordedSince,
       currency: this.#baseCurrency,
       total: snapshot.total,
       variationToday: summary.variationToday,
@@ -523,6 +550,7 @@ export class PortfolioService {
     byClass: Record<WealthClass, number>;
     byProvider: Record<string, number>;
     warnings: string[];
+    perAccount: AccountSnapshotLine[];
   } {
     const today = isoToday();
     const rates = this.#market.allRatesTo(this.#baseCurrency);
@@ -530,6 +558,7 @@ export class PortfolioService {
     const warnings: string[] = [];
     const items: ClassTotalInput[] = [];
     const byCurrency: Record<string, number> = {};
+    const perAccount: AccountSnapshotLine[] = [];
 
     for (const account of this.#accounts.list()) {
       if (account.is_active !== 1) continue;
@@ -543,6 +572,14 @@ export class PortfolioService {
       }
       if (converted) {
         byCurrency[account.currency] = round((byCurrency[account.currency] ?? 0) + converted.amount);
+        perAccount.push({
+          accountId: account.id,
+          providerId: account.provider_id,
+          assetClass: CLASS_BY_ACCOUNT_TYPE[account.type] ?? 'OTHER_ASSETS',
+          currency: account.currency,
+          valueOriginal: round(values.value),
+          valueBase: converted.amount,
+        });
       }
       items.push({
         class: CLASS_BY_ACCOUNT_TYPE[account.type] ?? 'OTHER_ASSETS',
@@ -563,6 +600,16 @@ export class PortfolioService {
           // Négatif dès l'agrégation : le patrimoine par établissement doit être net.
           valueBaseCurrency: convertedDebt ? -convertedDebt.amount : 0,
         });
+        if (convertedDebt) {
+          perAccount.push({
+            accountId: `${account.id}:loan`,
+            providerId: account.provider_id,
+            assetClass: 'LIABILITIES',
+            currency: account.currency,
+            valueOriginal: -round(loanDebt),
+            valueBase: -convertedDebt.amount,
+          });
+        }
       }
     }
 
@@ -574,9 +621,43 @@ export class PortfolioService {
     // le patrimoine net est donc la simple somme des classes.
     const byClass = { ...totals.byClass };
     const total = round(sum(WEALTH_CLASSES.map((key) => byClass[key] ?? 0)));
-    this.#persistSnapshot(today, total, byClass, totals.byProvider);
+    this.#persistSnapshot(today, total, byClass, totals.byProvider, perAccount, 'RECORDED');
 
-    return { today, total, byClass, byProvider: totals.byProvider, warnings };
+    return { today, total, byClass, byProvider: totals.byProvider, warnings, perAccount };
+  }
+
+  /**
+   * Enregistre un relevé daté du patrimoine (Mission 2 §9).
+   *
+   * Appelé par l'ordonnanceur (une fois par jour) et à l'ouverture du tableau de
+   * bord. `source` distingue un relevé réellement observé par l'application
+   * (`RECORDED`) d'un point reconstruit a posteriori (`RECONSTRUCTED`) : l'interface
+   * ne doit jamais confondre les deux.
+   */
+  recordDailySnapshot(date?: string): { date: string; total: number; accounts: number } {
+    const snapshot = this.#snapshot();
+    const targetDate = date ?? snapshot.today;
+    const byClass: Record<WealthClass, number> = { ...snapshot.byClass };
+    const liabilities = Math.abs(byClass.LIABILITIES ?? 0);
+    this.#persistSnapshot(
+      targetDate,
+      snapshot.total,
+      byClass,
+      snapshot.byProvider,
+      snapshot.perAccount,
+      'RECORDED',
+      liabilities,
+    );
+    return { date: targetDate, total: snapshot.total, accounts: snapshot.perAccount.length };
+  }
+
+  /** Dates des relevés réellement enregistrés par l'application. */
+  recordedSnapshotRange(): { from: string | null; to: string | null; count: number } {
+    const row = this.#db.get<{ from_date: string | null; to_date: string | null; count: number }>(
+      `SELECT MIN(date) AS from_date, MAX(date) AS to_date, COUNT(*) AS count
+         FROM net_worth_snapshots WHERE source = 'RECORDED'`,
+    );
+    return { from: row?.from_date ?? null, to: row?.to_date ?? null, count: row?.count ?? 0 };
   }
 
   #persistSnapshot(
@@ -584,24 +665,61 @@ export class PortfolioService {
     total: number,
     byClass: Record<WealthClass, number>,
     byProvider: Record<string, number>,
+    perAccount: readonly AccountSnapshotLine[],
+    source: 'RECORDED' | 'RECONSTRUCTED',
+    liabilities?: number,
   ): void {
     try {
+      const debt = liabilities ?? Math.abs(byClass.LIABILITIES ?? 0);
       this.#db.run(
-        `INSERT INTO net_worth_snapshots (date, total, by_class_json, by_provider_json, currency, computed_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO net_worth_snapshots (date, total, by_class_json, by_provider_json, currency,
+           computed_at, liabilities, by_account_json, source, positions_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(date) DO UPDATE SET total = excluded.total, by_class_json = excluded.by_class_json,
-           by_provider_json = excluded.by_provider_json, computed_at = excluded.computed_at`,
+           by_provider_json = excluded.by_provider_json, computed_at = excluded.computed_at,
+           liabilities = excluded.liabilities, by_account_json = excluded.by_account_json,
+           source = excluded.source, positions_count = excluded.positions_count`,
         date,
         total,
         JSON.stringify(byClass),
         JSON.stringify(byProvider),
         this.#baseCurrency,
         new Date().toISOString(),
+        round(debt),
+        JSON.stringify(perAccount.map((line) => ({ accountId: line.accountId, valueBase: line.valueBase }))),
+        source,
+        perAccount.length,
       );
+
+      // Détail par compte : table dédiée pour permettre les analyses par compte,
+      // par établissement et par classe sans relire les activités.
+      this.#db.run('DELETE FROM net_worth_snapshot_accounts WHERE snapshot_date = ?', date);
+      for (const line of perAccount) {
+        this.#db.run(
+          `INSERT INTO net_worth_snapshot_accounts
+             (snapshot_date, account_id, provider_id, asset_class, currency, value_original, value_base)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          date,
+          line.accountId,
+          line.providerId,
+          line.assetClass,
+          line.currency,
+          line.valueOriginal,
+          line.valueBase,
+        );
+      }
     } catch {
-      // L'écriture du snapshot est un cache : son échec ne doit jamais faire
+      // L'écriture du relevé est un cache : son échec ne doit jamais faire
       // échouer la réponse de l'API.
     }
+  }
+
+  /** Valeurs de relevé enregistrées, par date (pour recouvrir la reconstitution). */
+  #recordedPoints(): Map<string, number> {
+    const rows = this.#db.all<{ date: string; total: number }>(
+      "SELECT date, total FROM net_worth_snapshots WHERE source = 'RECORDED' ORDER BY date",
+    );
+    return new Map(rows.map((row) => [row.date, row.total]));
   }
 
   /**
@@ -656,7 +774,19 @@ export class PortfolioService {
         cash.set(row.account_id, round((cash.get(row.account_id) ?? 0) + row.amount));
         if (row.instrument_id && row.quantity) {
           const key = `${row.account_id}|${row.instrument_id}`;
-          const sign = row.type === 'BUY' || row.type === 'TRANSFER_IN' ? 1 : row.type === 'SELL' || row.type === 'TRANSFER_OUT' ? -1 : 0;
+          // Le sens d'un mouvement on-chain est porté par le signe du montant :
+          // sans cette règle, les tokens reçus sur un wallet resteraient absents
+          // de la courbe de patrimoine.
+          const sign =
+            row.type === 'BUY' || row.type === 'TRANSFER_IN' || row.type === 'STAKING_REWARD'
+              ? 1
+              : row.type === 'SELL' || row.type === 'TRANSFER_OUT'
+                ? -1
+                : row.type === 'CRYPTO_TRANSFER'
+                  ? row.amount > 0
+                    ? 1
+                    : -1
+                  : 0;
           if (sign !== 0) {
             quantities.set(key, round((quantities.get(key) ?? 0) + sign * row.quantity));
             if (sign > 0) {

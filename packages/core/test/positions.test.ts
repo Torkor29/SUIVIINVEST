@@ -154,6 +154,53 @@ test('mergePositions consolide un instrument détenu sur deux comptes', () => {
   assert.equal(position?.marketValue, 2250);
 });
 
+test('un transfert crypto entrant crée la position, un sortant la réduit', () => {
+  const result = computePositions({
+    activities: [
+      // Entrant : 2 ETH valorisés 3 000 € au moment de la réception.
+      activity({
+        type: 'CRYPTO_TRANSFER',
+        date: '2024-01-10',
+        instrumentId: 'eth',
+        quantity: 2,
+        unitPrice: 3000,
+        amount: 6000,
+      }),
+      // Sortant : 0,5 ETH envoyés ailleurs (aucune plus-value réalisée).
+      activity({
+        type: 'CRYPTO_TRANSFER',
+        date: '2024-02-10',
+        instrumentId: 'eth',
+        quantity: 0.5,
+        unitPrice: 3500,
+        amount: -1750,
+      }),
+    ],
+    lastPrices: { eth: 3500 },
+  });
+  const position = result.positions[0];
+  assert.ok(position);
+  assert.equal(position.quantity, 1.5);
+  assert.equal(position.costBasis, 4500); // 6000 - 0,5 × 3000
+  assert.equal(position.averageCost, 3000);
+  assert.equal(position.marketValue, 5250);
+  assert.equal(position.realizedPnl, 0, 'un transfert sortant ne réalise pas de plus-value');
+});
+
+test('un reward de staking versé en token augmente la quantité et le revenu', () => {
+  const result = computePositions({
+    activities: [
+      activity({ type: 'CRYPTO_TRANSFER', date: '2024-01-10', instrumentId: 'eth', quantity: 10, amount: 30000 }),
+      activity({ type: 'STAKING_REWARD', date: '2024-03-01', instrumentId: 'eth', quantity: 0.05, amount: 150 }),
+    ],
+    lastPrices: { eth: 3000 },
+  });
+  const position = result.positions[0];
+  assert.equal(position?.quantity, 10.05);
+  assert.equal(result.interest, 150, 'le reward est aussi un revenu');
+  assert.equal(position?.dividends, 0);
+});
+
 test('un instrument sans prix connu est valorisé à son coût (pas à zéro)', () => {
   const result = computePositions({
     activities: [

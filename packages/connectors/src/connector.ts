@@ -54,6 +54,58 @@ export interface HttpClient {
   sleep(ms: number): Promise<void>;
 }
 
+/* ------------------------------------------------------------ sidecar */
+
+/**
+ * Transport vers un exécutable auxiliaire (sidecar).
+ *
+ * Pourquoi : certaines sources ne sont exploitables que par une bibliothèque
+ * écrite dans un autre langage (DEGIRO et Trade Republic en Python). La lier
+ * directement imposerait sa licence et son runtime à toute l'application.
+ *
+ * Le sidecar est donc un **processus séparé** qui reçoit une requête JSON sur
+ * l'entrée standard et répond du JSON sur la sortie standard — ou, si l'URL est
+ * configurée, un service HTTP local. Le cœur de l'application ne connaît que
+ * cette interface : il peut la simuler en test, la remplacer, ou s'en passer.
+ *
+ * Contrat de réponse : `{ ok: true, data: ... }` ou `{ ok: false, code, message }`
+ * où `code` est un `ConnectorError.kind` (MFA_REQUIRED, SESSION_EXPIRED, ...).
+ */
+export interface SidecarRequest {
+  /** Opération demandée, ex. « degiro.positions », « tr.portfolio ». */
+  readonly operation: string;
+  readonly params?: Readonly<Record<string, unknown>>;
+  /** Secrets nécessaires à l'opération, fournis à la demande, jamais journalisés. */
+  readonly secrets?: Readonly<Record<string, string>>;
+  /** Durée maximale d'exécution, en millisecondes. */
+  readonly timeoutMs?: number;
+}
+
+export interface SidecarSuccess<T = unknown> {
+  readonly ok: true;
+  readonly data: T;
+  /** Avertissements non bloquants (donnée approximée, colonne absente...). */
+  readonly warnings?: readonly string[];
+}
+
+export interface SidecarFailure {
+  readonly ok: false;
+  readonly code: string;
+  readonly message: string;
+  /** Indique que l'échec est attendu et que réessayer après action utilisateur a du sens. */
+  readonly requiresUserAction?: boolean;
+}
+
+export type SidecarResponse<T = unknown> = SidecarSuccess<T> | SidecarFailure;
+
+export interface SidecarTransport {
+  /** Nom du sidecar (« degiro », « trade-republic ») : utilisé dans les messages d'erreur. */
+  readonly name: string;
+  /** Indique si le sidecar est configuré et exécutable (binaire ou URL présents). */
+  isAvailable(): boolean;
+  call<T = unknown>(request: SidecarRequest): Promise<SidecarResponse<T>>;
+}
+
 export interface ConnectorContext {
   readonly connectionId: string;
   readonly syncRunId: string;
@@ -66,6 +118,12 @@ export interface ConnectorContext {
   readonly now: () => Date;
   /** Signale une étape nécessitant une action humaine (2FA, app mobile...). */
   readonly requestUserAction?: (reason: string, details?: Record<string, string>) => Promise<void>;
+  /**
+   * Sidecars disponibles, indexés par nom. Optionnel : un connecteur qui en a
+   * besoin et n'en trouve pas remonte `NOT_SUPPORTED` avec un message explicite
+   * plutôt que d'échouer silencieusement.
+   */
+  readonly sidecars?: Readonly<Record<string, SidecarTransport>>;
 }
 
 /* --------------------------------------------------------- objets normalisés */
@@ -236,12 +294,25 @@ export interface Connector {
 export class ConnectorError extends Error {
   readonly providerId: string;
   readonly kind:
+    /** Identifiants absents ou refusés : l'utilisateur doit (re)saisir ses accès. */
     | 'AUTH_REQUIRED'
+    /** Une validation humaine est nécessaire (TOTP, application mobile, captcha). */
     | 'MFA_REQUIRED'
+    /** Session/token expiré : reconnexion nécessaire, sans ressaisie complète. */
+    | 'SESSION_EXPIRED'
+    /** Le fournisseur limite le débit : il faut attendre. */
     | 'RATE_LIMITED'
+    /** Le fournisseur est disponible mais son comportement a changé (endpoint, format). */
     | 'PROVIDER_BROKEN'
+    /** Le fournisseur est injoignable (panne, DNS, timeout). */
+    | 'PROVIDER_DOWN'
+    /** Erreur d'exécution de la synchronisation elle-même (écriture, cohérence). */
+    | 'SYNC_ERROR'
+    /** Problème réseau côté client. */
     | 'NETWORK'
+    /** Données inexploitables (format, cohérence) : rien n'est deviné. */
     | 'DATA'
+    /** Fonctionnalité non supportée par cette source, par conception. */
     | 'NOT_SUPPORTED';
 
   constructor(
@@ -264,11 +335,33 @@ export class ConnectorError extends Error {
     switch (this.kind) {
       case 'AUTH_REQUIRED':
       case 'MFA_REQUIRED':
+      case 'SESSION_EXPIRED':
         return 'AUTH_REQUIRED';
       case 'NOT_SUPPORTED':
         return 'DISCONNECTED';
       default:
         return 'ERROR';
+    }
+  }
+
+  /**
+   * Action attendue de l'utilisateur, en clair. Sert à l'interface pour afficher
+   * une consigne actionnable au lieu d'une erreur technique.
+   */
+  get userAction(): string | null {
+    switch (this.kind) {
+      case 'AUTH_REQUIRED':
+        return 'Saisissez vos identifiants pour cette source.';
+      case 'MFA_REQUIRED':
+        return 'Validez la connexion dans l\'application du fournisseur, puis relancez la synchronisation.';
+      case 'SESSION_EXPIRED':
+        return 'Votre session a expiré : reconnectez-vous à cette source.';
+      case 'RATE_LIMITED':
+        return 'Le fournisseur limite temporairement les accès : réessayez dans quelques minutes.';
+      case 'PROVIDER_DOWN':
+        return 'Le service du fournisseur est injoignable : réessayez plus tard.';
+      default:
+        return null;
     }
   }
 }
