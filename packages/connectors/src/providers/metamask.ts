@@ -20,8 +20,9 @@
  * officieux est confirmé.
  *
  *  - Solde natif : JSON-RPC `eth_getBalance` (standard EVM, stable par nature).
- *    L'URL par défaut (`https://cloudflare-eth.com`) est un service public NON
- *    contractuel : à surcharger via `config.rpcUrl`.
+ *    Les URL par défaut sont des services publics NON contractuels, choisis
+ *    parce qu'ils répondaient sans clé lors de la vérification du 2026-09-21
+ *    (voir `CHAIN_ENDPOINTS`) : à surcharger via `config.rpcUrl`.
  *  - Jetons ERC-20 : API compatible Etherscan (`module=account&action=tokentx`).
  *    Le point d'entrée par défaut `https://api.etherscan.io/api` exige
  *    aujourd'hui une clé d'API pour la plupart des réseaux ; elle est lue de
@@ -68,8 +69,68 @@ const RAW_SOURCE_API = 'evm.explorer_api';
 const RAW_SOURCE_JSON = 'evm.address_json';
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
-const DEFAULT_RPC_URL = 'https://cloudflare-eth.com';
-const DEFAULT_EXPLORER_URL = 'https://api.etherscan.io/api';
+
+/**
+ * Points d'entrée par défaut, par chaîne.
+ *
+ * Choix guidé par une vérification datée (audit du 2026-09-21) :
+ *  - les endpoints JSON-RPC publics vérifiés RÉPONDANT ont été retenus ;
+ *    plusieurs nœuds historiquement cités (`eth.llamarpc.com`, `rpc.ankr.com`,
+ *    `polygon-rpc.com`, `cloudflare-eth.com`) refusent désormais `eth_getBalance`
+ *    ou exigent une clé : ils ne doivent plus servir de défaut.
+ *  - pour l'historique, Blockscout est préféré car il fonctionne SANS clé sur
+ *    toutes les chaînes visées ; Etherscan ne reste pertinent (palier gratuit)
+ *    que sur Ethereum, Arbitrum et Polygon, et exige une clé API ailleurs.
+ *
+ * Toute URL reste surchargeable via `config.rpcUrl` / `config.explorerUrl` :
+ * l'utilisateur n'est jamais prisonnier d'un fournisseur.
+ */
+interface ChainEndpoints {
+  readonly rpcUrl: string;
+  readonly explorerUrl: string;
+  readonly explorerKind: 'blockscout' | 'etherscan';
+}
+
+const CHAIN_ENDPOINTS: Readonly<Record<string, ChainEndpoints>> = {
+  ethereum: {
+    rpcUrl: 'https://ethereum-rpc.publicnode.com',
+    explorerUrl: 'https://eth.blockscout.com/api',
+    explorerKind: 'blockscout',
+  },
+  arbitrum: {
+    rpcUrl: 'https://arb1.arbitrum.io/rpc',
+    explorerUrl: 'https://arbitrum.blockscout.com/api',
+    explorerKind: 'blockscout',
+  },
+  optimism: {
+    rpcUrl: 'https://mainnet.optimism.io',
+    explorerUrl: 'https://optimism.blockscout.com/api',
+    explorerKind: 'blockscout',
+  },
+  base: {
+    rpcUrl: 'https://mainnet.base.org',
+    explorerUrl: 'https://base.blockscout.com/api',
+    explorerKind: 'blockscout',
+  },
+  polygon: {
+    rpcUrl: 'https://polygon-bor-rpc.publicnode.com',
+    explorerUrl: 'https://polygon.blockscout.com/api',
+    explorerKind: 'blockscout',
+  },
+  bnb: {
+    rpcUrl: 'https://bsc-dataseed.binance.org',
+    explorerUrl: 'https://api.etherscan.io/v2/api?chainid=56',
+    explorerKind: 'etherscan',
+  },
+  avalanche: {
+    rpcUrl: 'https://api.avax.network/ext/bc/C/rpc',
+    explorerUrl: 'https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api',
+    explorerKind: 'etherscan',
+  },
+};
+
+export const DEFAULT_CHAIN = 'ethereum';
+const FALLBACK_ENDPOINTS: ChainEndpoints = CHAIN_ENDPOINTS[DEFAULT_CHAIN] as ChainEndpoints;
 
 /** Champs de configuration qui trahiraient du matériel de signature. */
 const FORBIDDEN_CONFIG_KEYS = [
@@ -115,13 +176,21 @@ function requireAddress(ctx: ConnectorContext): string {
   return address.toLowerCase();
 }
 
+function chainEndpoints(ctx: ConnectorContext): ChainEndpoints {
+  const chain = (ctx.config.chain ?? DEFAULT_CHAIN).trim().toLowerCase();
+  return CHAIN_ENDPOINTS[chain] ?? FALLBACK_ENDPOINTS;
+}
+
 function rpcUrl(ctx: ConnectorContext): string {
-  return (ctx.config.rpcUrl ?? '').trim() || DEFAULT_RPC_URL;
+  return (ctx.config.rpcUrl ?? '').trim() || chainEndpoints(ctx).rpcUrl;
 }
 
 function explorerUrl(ctx: ConnectorContext): string {
-  return (ctx.config.explorerUrl ?? '').trim() || DEFAULT_EXPLORER_URL;
+  return (ctx.config.explorerUrl ?? '').trim() || chainEndpoints(ctx).explorerUrl;
 }
+
+/** Chaînes supportées nativement (sans configuration d'URL). */
+export const SUPPORTED_CHAINS: readonly string[] = Object.keys(CHAIN_ENDPOINTS);
 
 /* ------------------------------------------------------------ conversions */
 
@@ -632,6 +701,8 @@ export const metamaskInternals = {
   assertNoSigningMaterial,
   unitsToNumber,
   transferToTransaction,
-  DEFAULT_RPC_URL,
-  DEFAULT_EXPLORER_URL,
+  SUPPORTED_CHAINS,
+  CHAIN_ENDPOINTS,
+  DEFAULT_CHAIN,
+  DEFAULT_ENDPOINTS: FALLBACK_ENDPOINTS,
 };

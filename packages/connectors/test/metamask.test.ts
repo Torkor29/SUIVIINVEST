@@ -119,7 +119,13 @@ test('metamask : testConnection interroge le nœud RPC (réseau simulé, aucun a
   assert.equal(result.status, 'CONNECTED');
   assert.match(result.message, /1 ETH/);
   assert.equal(http.requests.length, 1);
-  assert.match(http.requests[0]?.url ?? '', /cloudflare-eth/);
+  // Le défaut doit être un endpoint RPC vérifié comme répondant sans clé :
+  // plusieurs nœuds publics historiquement cités refusent désormais eth_getBalance.
+  assert.match(http.requests[0]?.url ?? '', /publicnode|base\.org|arbitrum\.io|optimism\.io|binance\.org|avax\.network/);
+  assert.ok(
+    !/cloudflare-eth|llamarpc|ankr\.com|polygon-rpc/.test(http.requests[0]?.url ?? ''),
+    'aucun endpoint connu comme hors service ne doit servir de défaut',
+  );
 });
 
 test('metamask : configuration RPC surchargeable et clé d\'explorateur optionnelle jamais loggée', async () => {

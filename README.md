@@ -44,11 +44,11 @@ et liquidités, réunis dans une seule vue.
 
 | Source | Mode | Statut |
 | --- | --- | --- |
-| **DEGIRO** | Import de fichier (CSV officiel) | Fiable. L'API privée n'est utilisée que si vous la configurez explicitement ; elle est isolée et peut casser sans impacter le reste |
-| **Trade Republic** | Import de fichier (CSV) | Fiable. L'API non officielle est isolée ; l'authentification peut exiger une validation sur l'application mobile |
-| **Crédit Agricole / CA Bourse** | Import de fichier (CSV) + connecteur web | Export CSV recommandé (robuste aux changements de site) ; le connecteur web est marqué comme fragile |
-| **Revolut** | Import de fichier (CSV) | Recommandé. L'API Open Banking/PSD2 exige le statut de fournisseur agréé : elle n'est pas contournée |
-| **MetaMask / wallets EVM** | Adresse publique | Aucune connexion permanente requise, aucun secret demandé |
+| **DEGIRO** | Import de fichier (export `Account.csv`) | Fiable. Entêtes FR et EN gérés (`Date,Heure,Date de,Produit,Code ISIN,…,ID Ordre`) et l'`ID Ordre` sert d'identifiant d'idempotence. L'API privée n'est utilisée que si vous la configurez, et elle est isolée |
+| **Trade Republic** | Import de fichier (export CSV officiel) | Fiable. Format officiel à 23 colonnes (`transaction_id` en UUID utilisé pour l'idempotence). L'API non officielle est isolée ; l'authentification exige un code ou une approbation dans l'application |
+| **Crédit Agricole / CA Bourse** | Import de fichier + connecteur web | Export du site recommandé (robuste aux refontes). **Les positions et ISIN ne sont pas récupérables** par les modules publics : saisie manuelle ou import de positions |
+| **Revolut** | Import du relevé (PDF ou Excel selon la devise) | L'API Open Banking/PSD2 exige un certificat eIDAS et un agrément AISP : **impossible pour un particulier**, donc non contournée. Le connecteur sait aussi ingérer un CSV si vous convertissez le relevé |
+| **MetaMask / wallets EVM** | Adresse publique | Aucune connexion permanente requise, aucun secret demandé. 7 chaînes fonctionnent sans clé (nœuds RPC et Blockscout vérifiés) ; Etherscan palier gratuit seulement sur Ethereum, Arbitrum et Polygon |
 
 Chaque connecteur déclare honnêtement ses capacités : l'interface indique « Import de fichiers
 uniquement » quand aucune API exploitable n'existe, plutôt que de laisser croire le contraire.
@@ -273,7 +273,9 @@ docker run --rm -v suiviinvest-backups:/backups node:24-bookworm-slim \
    chez l'un n'empêche pas les autres. L'historique indique pour chacun les éléments créés,
    mis à jour, ignorés et les erreurs.
 6. **Prix** — Le rafraîchissement des cours se fait à la demande (Paramètres) ou lors des
-   synchronisations ; les prix sont mis en cache par jour.
+   synchronisations ; les prix sont mis en cache par jour (un prix déjà connu le même jour
+   n'est pas redemandé). Aucun prix n'est jamais inventé : un cours manquant est signalé dans
+   l'interface plutôt que remplacé par une valeur approchée.
 
 ---
 

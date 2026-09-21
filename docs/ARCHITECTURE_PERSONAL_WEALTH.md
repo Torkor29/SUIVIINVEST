@@ -270,15 +270,22 @@ HTTP injectable (`FakeHttpClient`) et une horloge injectable.
 
 ## 10. Reste à faire (priorisé)
 
+0. **Formats vérifiés à exploiter** : DEGIRO (entêtes FR/EN + `ID Ordre` comme identifiant
+   externe) et Trade Republic (export CSV officiel à 23 colonnes avec `transaction_id`) sont
+   implémentés ; Crédit Agricole (positions/ISIN indisponibles) et Revolut (relevé PDF/Excel,
+   pas de CSV natif) sont documentés comme dégradés volontairement.
 1. **Découper `apps/api/src/services/portfolio.ts`** (~950 lignes) en
    `networth.ts` / `investments.ts` / `income.ts` / `analytics.ts`. Le fichier est correct et
    testé, mais dépasse la limite de taille fixée dans les consignes.
 2. **Connecteurs par API** pour DEGIRO et Trade Republic : aujourd'hui le mode API est déclaré
    non vérifié et c'est le CSV qui est opérationnel ; l'option propre est un sidecar Python
    (voir §5) plutôt qu'une réimplémentation en TypeScript des API privées.
-3. **Indexer on-chain réel** pour MetaMask : aujourd'hui les wallets se remplissent par import
-   JSON d'adresses/données ; il manque un provider d'indexation (Etherscan V2, Blockscout,
-   Alchemy) avec la couche multi-chaînes.
+3. **Indexer on-chain** pour MetaMask : les points d'entrée par défaut sont désormais un
+   registre par chaîne (7 chaînes) avec des URL vérifiées répondant **sans clé** — nœuds RPC
+   publics + Blockscout. Reste à brancher un fournisseur d'indexation paginé complet
+   (Blockscout en priorité, Etherscan V2 en repli quand une clé est fournie) pour l'historique
+   long : sans clé, Base/BNB Chain/Optimism/Avalanche n'ont pas d'historique gratuit chez
+   Etherscan (palier payant), Blockscout reste la seule voie ouverte.
 4. **Historique quotidien des positions** : le TWR par compte nécessite une valorisation
    quotidienne ; à alimenter par une synchronisation quotidienne régulière.
 5. **Addons** : non implémentés (jugés hors périmètre pour un usage personnel).
