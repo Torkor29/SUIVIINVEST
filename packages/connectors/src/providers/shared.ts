@@ -167,6 +167,11 @@ export interface ActivityDraft {
   readonly unitPrice?: number | null;
   readonly fees?: number;
   readonly taxes?: number;
+  /**
+   * Taux de change communiqué par la source, s'il existe. Prioritaire sur le taux
+   * reconstitué par l'application : c'est celui réellement appliqué à l'opération.
+   */
+  readonly fxRate?: number | null;
 }
 
 /**
@@ -183,6 +188,7 @@ export function pushActivity(acc: ImportAccumulator, draft: ActivityDraft): void
     amount: draft.amount,
     currency: draft.currency,
     rawSourceType: draft.rawSourceType,
+    fxRate: draft.fxRate ?? null,
   };
 
   if (isIncomeType(draft.type)) {

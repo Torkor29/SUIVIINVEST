@@ -1,0 +1,19 @@
+{
+  "status": "1",
+  "message": "OK",
+  "result": [
+    {
+      "hash": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6",
+      "logIndex": "3",
+      "blockNumber": "21000030",
+      "timeStamp": "1772500000",
+      "from": "0x5555555555555555555555555555555555555555",
+      "to": "0x1111111111111111111111111111111111111111",
+      "contractAddress": "0x6666666666666666666666666666666666666666",
+      "tokenName": "Exemple Liquid Token",
+      "tokenSymbol": "LDO",
+      "tokenDecimal": "18",
+      "value": "1250000000000000000"
+    }
+  ]
+}

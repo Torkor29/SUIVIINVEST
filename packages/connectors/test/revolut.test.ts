@@ -38,7 +38,9 @@ test('revolut : relevé de compte — transferts signés, revenus, états non fi
   assert.equal(byType.get('FEE')?.amount, -5);
 
   const incomeTypes = result.income.map((item) => item.type).sort();
-  assert.deepEqual(incomeTypes, ['INTEREST', 'STAKING_REWARD']);
+  // Le cashback d'une carte bancaire est un revenu bancaire, pas un reward de
+  // staking : le classer en STAKING_REWARD polluerait les rapports crypto.
+  assert.deepEqual(incomeTypes, ['INTEREST', 'INTEREST']);
 
   // L'opération PENDING est écartée et signalée.
   assert.ok(result.warnings.some((warning) => /COMPLETED/.test(warning)));

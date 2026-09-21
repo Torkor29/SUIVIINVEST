@@ -35,6 +35,7 @@
  */
 
 import {
+  ConnectorError,
   type Connector,
   type ConnectorContext,
   type ConnectionTestResult,
@@ -43,6 +44,8 @@ import {
   type NormalizedIncome,
   type NormalizedPosition,
   type NormalizedTransaction,
+  type SidecarFailure,
+  type SidecarTransport,
   type SyncCursor,
   type SyncStatusReport,
   type SyncWindow,
@@ -52,7 +55,6 @@ import { detectActivityType } from '@suiviinvest/core';
 import type { FieldSpec } from '../csv.ts';
 import {
   createCsvFormat,
-  fileOnlyError,
   isIncomeType,
   pushActivity,
   readCurrency,
@@ -61,6 +63,7 @@ import {
   readQuantity,
   readText,
   rejectRow,
+  slug,
   warnOnce,
   type CsvRowContext,
 } from './shared.ts';
@@ -333,68 +336,572 @@ const DE_FORMAT = createCsvFormat({
   parseRow: parseDeRow,
 });
 
+/* ================================================================== MODE API */
+/*
+ * Synchronisation par sidecar Python (`pytr`, import en lecture seule). Aucune
+ * méthode d'ordre (`market_order`, `limit_order`, `stop_market_order`) n'est
+ * référencée : le sidecar n'expose que `test`, `portfolio`, `cash`, `positions`,
+ * `transactions`, `income`, `savingsplans`.
+ *
+ * Authentification : la validation se fait dans l'application mobile (ou par code
+ * à 4 chiffres). Le sidecar renvoie `MFA_REQUIRED` avec `requiresUserAction: true`
+ * et le message « Validation Trade Republic requise » ; il REPREND ensuite la
+ * synchronisation grâce à la session/cookie exportée par `pytr` (jamais par un mot
+ * de passe conservé en clair — voir docs/connectors/sidecars.md).
+ *
+ * Les identifiants sont lus à la demande (`ctx.secrets`) et transmis DANS la
+ * requête du sidecar ; ce module n'écrit rien sur disque et ne journalise aucune
+ * valeur secrète.
+ */
+
+const SIDECAR_NAME = 'trade-republic';
+const RAW_SOURCE_API = 'trade_republic.api';
+const ACCOUNT_SECURITIES = 'trade-republic-securities';
+const ACCOUNT_CASH = 'trade-republic-cash';
+
+/** Noms logiques des secrets lus pour le sidecar (préfixés par SyncService). */
+const API_SECRET_NAMES = ['phone', 'pin', 'session', 'verify_code', 'two_factor_code'] as const;
+
+const KNOWN_FAILURE_CODES: ReadonlySet<string> = new Set([
+  'AUTH_REQUIRED',
+  'MFA_REQUIRED',
+  'SESSION_EXPIRED',
+  'RATE_LIMITED',
+  'PROVIDER_BROKEN',
+  'PROVIDER_DOWN',
+  'SYNC_ERROR',
+  'NETWORK',
+  'DATA',
+  'NOT_SUPPORTED',
+]);
+
+/** Types de revenus Trade Republic -> canonique (clés passées par `slug`). */
+const TR_INCOME_TYPE_MAP: Readonly<Record<string, NormalizedIncome['type']>> = {
+  dividend: 'DIVIDEND',
+  dividendpayment: 'DIVIDEND',
+  cashdividend: 'DIVIDEND',
+  interest: 'INTEREST',
+  interestpayment: 'INTEREST',
+  interestpayout: 'INTEREST',
+  benefitsaveback: 'STAKING_REWARD',
+  saveback: 'STAKING_REWARD',
+};
+
+/* ------------------------------------------ formes attendues du sidecar */
+
+export interface TradeRepublicSidecarAccount {
+  readonly id: string | number;
+  readonly name?: string;
+  readonly currency?: string;
+  readonly type?: string;
+  readonly balance?: number | null;
+}
+
+export interface TradeRepublicSidecarBalance {
+  readonly accountId?: string | number;
+  readonly date?: string;
+  readonly cash: number;
+  readonly currency?: string;
+}
+
+export interface TradeRepublicSidecarPosition {
+  readonly accountId?: string | number;
+  readonly isin?: string | null;
+  readonly symbol?: string | null;
+  readonly name?: string;
+  readonly quantity: number;
+  readonly price?: number | null;
+  readonly currency?: string;
+  readonly kind?: string;
+}
+
+export interface TradeRepublicSidecarTransaction {
+  readonly accountId?: string | number;
+  readonly id?: string | null;
+  readonly date: string;
+  readonly category?: string | null;
+  readonly type?: string | null;
+  readonly description?: string | null;
+  readonly name?: string | null;
+  readonly isin?: string | null;
+  readonly quantity?: number | null;
+  readonly price?: number | null;
+  readonly amount: number;
+  readonly currency?: string;
+  readonly fees?: number | null;
+  readonly taxes?: number | null;
+}
+
+export interface TradeRepublicSidecarIncome {
+  readonly accountId?: string | number;
+  readonly id?: string | null;
+  readonly date: string;
+  readonly type?: string | null;
+  readonly description?: string | null;
+  readonly amount: number;
+  readonly currency?: string;
+  readonly withholdingTax?: number | null;
+}
+
+export interface TradeRepublicSidecarSavingsPlan {
+  readonly id?: string | null;
+  readonly isin?: string | null;
+  readonly name?: string | null;
+  readonly amount: number;
+  readonly interval?: string | null;
+  readonly currency?: string;
+  readonly active?: boolean;
+}
+
+/** Plan d'épargne normalisé (lecture seule ; hors du contrat `Connector`). */
+export interface NormalizedSavingsPlan {
+  readonly externalAccountId: string;
+  readonly externalAssetId: string | null;
+  readonly isin: string | null;
+  readonly name: string;
+  readonly amount: number;
+  readonly interval: string;
+  readonly currency: string;
+  readonly active: boolean;
+  readonly rawSourceType: string;
+}
+
+/* ------------------------------------------------ résolution du transport */
+
+let registeredSidecar: SidecarTransport | null = null;
+
+function activeSidecar(ctx: ConnectorContext): SidecarTransport | null {
+  const fromContext = ctx.sidecars?.[SIDECAR_NAME];
+  if (fromContext) return fromContext.isAvailable() ? fromContext : null;
+  return registeredSidecar && registeredSidecar.isAvailable() ? registeredSidecar : null;
+}
+
+function apiUnavailableError(method: string): ConnectorError {
+  const labels = [EN_FORMAT, DE_FORMAT].map((format) => `${format.label} [${format.id}]`).join(' | ');
+  return new ConnectorError(
+    PROVIDER_ID,
+    'NOT_SUPPORTED',
+    `${method} n'est pas disponible en automatique : le sidecar « trade-republic » n'est pas ` +
+      `configuré. Ce connecteur fonctionne par import de fichier (formats : ${labels}). ` +
+      'Pour activer la synchronisation automatique, installez le sidecar Python Trade Republic ' +
+      '(voir docs/connectors/sidecars.md et sidecar/README.md) puis définissez ' +
+      'SUIVIINVEST_SIDECAR_TRADE_REPUBLIC_COMMAND ou SUIVIINVEST_SIDECAR_TRADE_REPUBLIC_URL.',
+  );
+}
+
+function toConnectorError(operation: string, failure: SidecarFailure): ConnectorError {
+  const kind: ConnectorError['kind'] = KNOWN_FAILURE_CODES.has(failure.code)
+    ? (failure.code as ConnectorError['kind'])
+    : 'PROVIDER_BROKEN';
+  const message = failure.message || `Le sidecar Trade Republic a échoué pendant « ${operation} ».`;
+  return new ConnectorError(PROVIDER_ID, kind, message);
+}
+
+async function collectSecrets(ctx: ConnectorContext): Promise<Record<string, string>> {
+  const secrets: Record<string, string> = {};
+  for (const name of API_SECRET_NAMES) {
+    const value = await ctx.secrets.get(`trade_republic_${name}`);
+    if (value !== null && value !== '') secrets[name] = value;
+  }
+  return secrets;
+}
+
+async function callSidecar<T>(
+  ctx: ConnectorContext,
+  sidecar: SidecarTransport,
+  operation: string,
+  params: Record<string, unknown> = {},
+): Promise<T> {
+  const response = await sidecar.call<T>({
+    operation,
+    params,
+    secrets: await collectSecrets(ctx),
+  });
+  if (!response.ok) throw toConnectorError(operation, response);
+  for (const warning of response.warnings ?? []) {
+    ctx.logger.warn(`Sidecar Trade Republic : ${warning}`);
+  }
+  return response.data;
+}
+
+function expectArray<T>(data: unknown, key: string, operation: string): readonly T[] {
+  if (data === null || typeof data !== 'object') {
+    throw new ConnectorError(
+      PROVIDER_ID,
+      'DATA',
+      `Sidecar Trade Republic : opération « ${operation} » sans objet de données exploitable.`,
+    );
+  }
+  const value = (data as Record<string, unknown>)[key];
+  if (!Array.isArray(value)) {
+    throw new ConnectorError(
+      PROVIDER_ID,
+      'DATA',
+      `Sidecar Trade Republic : champ « ${key} » absent ou non tableau pour « ${operation} ».`,
+    );
+  }
+  return value as readonly T[];
+}
+
+/* ------------------------------------------------------------- normalisation */
+
+export function trAccountExternalId(raw: string | number): string {
+  return `trade-republic-${String(raw)}`;
+}
+
+function accountIdOf(raw: string | number | undefined, kind: 'cash' | 'securities'): string {
+  if (raw === undefined || raw === null || raw === '') {
+    return kind === 'cash' ? ACCOUNT_CASH : ACCOUNT_SECURITIES;
+  }
+  return trAccountExternalId(raw);
+}
+
+function isSecuritiesType(type: ActivityType): boolean {
+  return type === 'BUY' || type === 'SELL' || type === 'SPLIT';
+}
+
+function normalizeApiAccount(raw: TradeRepublicSidecarAccount): NormalizedAccount {
+  const folded = slug(raw.type ?? '');
+  const isCash = folded.includes('cash');
+  return {
+    externalAccountId: trAccountExternalId(raw.id),
+    name: raw.name?.trim() || (isCash ? 'Compte espèces Trade Republic' : 'Portefeuille Trade Republic'),
+    type: isCash ? 'CASH' : 'SECURITIES',
+    currency: readCurrencyValue(raw.currency),
+    rawSourceType: RAW_SOURCE_API,
+    balance: typeof raw.balance === 'number' ? raw.balance : null,
+  };
+}
+
+function readCurrencyValue(value: string | undefined): string {
+  const trimmed = (value ?? '').trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(trimmed) ? trimmed : 'EUR';
+}
+
+function normalizeApiBalance(raw: TradeRepublicSidecarBalance, now: Date): NormalizedBalance {
+  return {
+    externalAccountId: accountIdOf(raw.accountId, 'cash'),
+    date: readDateValue(raw.date, now),
+    cash: raw.cash,
+    currency: readCurrencyValue(raw.currency),
+    rawSourceType: RAW_SOURCE_API,
+  };
+}
+
+function readDateValue(value: string | undefined, now: Date): string {
+  const trimmed = (value ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  return now.toISOString().slice(0, 10);
+}
+
+function normalizeApiPosition(raw: TradeRepublicSidecarPosition): NormalizedPosition {
+  const isin = raw.isin?.trim() || null;
+  return {
+    externalAccountId: accountIdOf(raw.accountId, 'securities'),
+    externalAssetId: isin,
+    isin,
+    symbol: raw.symbol?.trim() || null,
+    name: raw.name?.trim() || isin || 'Titre Trade Republic',
+    kind: mapTrAssetKind(raw.kind),
+    quantity: raw.quantity,
+    unitPrice: typeof raw.price === 'number' ? raw.price : null,
+    currency: readCurrencyValue(raw.currency),
+    rawSourceType: RAW_SOURCE_API,
+  };
+}
+
+function mapTrAssetKind(raw: string | undefined): NormalizedPosition['kind'] {
+  switch (slug(raw ?? '')) {
+    case 'etf':
+      return 'ETF';
+    case 'fund':
+      return 'FUND';
+    case 'stock':
+    case 'equity':
+      return 'EQUITY';
+    case 'crypto':
+      return 'CRYPTO';
+    case 'synthetic':
+      return 'OTHER';
+    default:
+      return 'OTHER';
+  }
+}
+
+function normalizeApiTransaction(raw: TradeRepublicSidecarTransaction): NormalizedTransaction | null {
+  const date = readDateValue(raw.date, new Date(0));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || raw.date.trim() === '') return null;
+  const description = raw.description ?? raw.type ?? '';
+  const category = raw.category ?? '';
+  const type = raw.type ?? '';
+  const quantity = raw.quantity ?? null;
+  const activityType = classifyTradeRepublicEn(
+    category,
+    type,
+    description,
+    raw.amount,
+    quantity !== null,
+  );
+  if (!activityType) return null;
+  const kind = isSecuritiesType(activityType) ? 'securities' : 'cash';
+  return {
+    externalAccountId: accountIdOf(raw.accountId, kind),
+    externalTransactionId: raw.id?.trim() || null,
+    externalAssetId: raw.isin?.trim() || null,
+    date,
+    type: activityType,
+    description: description.trim() || `${category} ${type}`.trim() || 'Opération Trade Republic',
+    quantity,
+    unitPrice: typeof raw.price === 'number' ? raw.price : null,
+    amount: raw.amount,
+    currency: readCurrencyValue(raw.currency),
+    fees: Math.abs(raw.fees ?? 0),
+    taxes: Math.abs(raw.taxes ?? 0),
+    rawSourceType: RAW_SOURCE_API,
+  };
+}
+
+function classifyTrIncome(raw: TradeRepublicSidecarIncome): NormalizedIncome['type'] | null {
+  const mapped = raw.type ? TR_INCOME_TYPE_MAP[slug(raw.type)] : undefined;
+  if (mapped) return mapped;
+  const detected = detectActivityType(`${raw.type ?? ''} ${raw.description ?? ''}`, {
+    amount: raw.amount,
+    hasQuantity: false,
+  });
+  return detected && isIncomeType(detected) ? detected : null;
+}
+
+function normalizeApiIncome(raw: TradeRepublicSidecarIncome): NormalizedIncome | null {
+  const date = readDateValue(raw.date, new Date(0));
+  if (raw.date.trim() === '' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const type = classifyTrIncome(raw);
+  if (!type) return null;
+  return {
+    externalAccountId: accountIdOf(raw.accountId, 'cash'),
+    externalTransactionId: raw.id?.trim() || null,
+    date,
+    type,
+    description: raw.description?.trim() || raw.type?.trim() || 'Revenu Trade Republic',
+    amount: raw.amount,
+    currency: readCurrencyValue(raw.currency),
+    withholdingTax: Math.abs(raw.withholdingTax ?? 0),
+    rawSourceType: RAW_SOURCE_API,
+  };
+}
+
 /* -------------------------------------------------------------- connecteur */
 
-export const tradeRepublicConnector: Connector = {
+interface TrPortfolioData {
+  readonly accounts?: readonly TradeRepublicSidecarAccount[];
+  readonly positions?: readonly TradeRepublicSidecarPosition[];
+}
+interface TrCashData {
+  readonly balances?: readonly TradeRepublicSidecarBalance[];
+}
+interface TrPositionsData {
+  readonly positions?: readonly TradeRepublicSidecarPosition[];
+}
+interface TrTransactionsData {
+  readonly transactions?: readonly TradeRepublicSidecarTransaction[];
+  readonly cursor?: string | null;
+}
+interface TrIncomeData {
+  readonly income?: readonly TradeRepublicSidecarIncome[];
+}
+interface TrSavingsPlansData {
+  readonly savingsPlans?: readonly TradeRepublicSidecarSavingsPlan[];
+}
+
+export interface TradeRepublicConnector extends Connector {
+  /** Branche (ou débranche) le sidecar Python utilisé pour la synchronisation réseau. */
+  configureSidecar(transport: SidecarTransport | null): void;
+}
+
+
+
+export const tradeRepublicConnector: TradeRepublicConnector = {
   id: PROVIDER_ID,
   displayName: 'Trade Republic',
-  capabilities: {
-    accounts: true,
-    balances: true,
-    positions: false, // un relevé de mouvements n'est pas un état de portefeuille.
-    transactions: true,
-    income: true,
-    api: false, // aucun chemin API implémenté (login appareil + confirmation app).
+  /**
+   * `capabilities.api` vaut `true` SEULEMENT si un sidecar Trade Republic est
+   * disponible (déclaré par `createSidecarTransports` via `configureSidecar`).
+   */
+  get capabilities() {
+    const api = registeredSidecar?.isAvailable() ?? false;
+    return {
+      accounts: true,
+      balances: true,
+      // Un relevé de mouvements n'est pas un état de portefeuille ; l'API (sidecar) en fournit.
+      positions: api,
+      transactions: true,
+      income: true,
+      api,
+    };
   },
   importFormats: [EN_FORMAT, DE_FORMAT],
   requiredConfig: [],
   requiredSecrets: [],
 
-  async testConnection(_ctx: ConnectorContext): Promise<ConnectionTestResult> {
+  /** Déclare (ou retire) le sidecar Trade Republic utilisé pour la synchronisation réseau. */
+  configureSidecar(transport: SidecarTransport | null): void {
+    registeredSidecar = transport && transport.isAvailable() ? transport : null;
+  },
+
+  async testConnection(ctx: ConnectorContext): Promise<ConnectionTestResult> {
+    const sidecar = activeSidecar(ctx);
+    if (!sidecar) {
+      return {
+        ok: true,
+        status: 'DISCONNECTED',
+        message:
+          'Connecteur en mode import de fichier : aucune session Trade Republic n\'est ouverte et ' +
+          'aucun sidecar n\'est configuré. Exportez les transactions depuis l\'application puis ' +
+          'importez le CSV.',
+        requiresUserAction: false,
+      };
+    }
+    const response = await sidecar.call<{ library?: string }>({
+      operation: 'test',
+      secrets: await collectSecrets(ctx),
+    });
+    if (response.ok) {
+      const library = response.data?.library ? ` (bibliothèque ${response.data.library})` : '';
+      return {
+        ok: true,
+        status: 'CONNECTED',
+        message: `Sidecar Trade Republic opérationnel${library} : synchronisation en lecture seule disponible.`,
+        requiresUserAction: false,
+      };
+    }
     return {
-      ok: true,
-      status: 'DISCONNECTED',
-      message:
-        'Connecteur en mode import de fichier : aucune session Trade Republic n\'est ouverte. ' +
-        'Exportez les transactions depuis l\'application puis importez le CSV.',
-      requiresUserAction: false,
+      ok: false,
+      status: isUserActionCode(response.code) ? 'AUTH_REQUIRED' : 'ERROR',
+      message: response.message,
+      requiresUserAction: response.requiresUserAction === true,
     };
   },
 
   async syncAccounts(ctx: ConnectorContext): Promise<readonly NormalizedAccount[]> {
-    ctx.logger.info('Trade Republic : synchronisation réseau non implémentée (mode fichier).');
-    throw fileOnlyError(PROVIDER_ID, 'syncAccounts', this.importFormats);
+    const sidecar = activeSidecar(ctx);
+    if (!sidecar) {
+      ctx.logger.info('Trade Republic : synchronisation réseau non disponible (mode fichier).');
+      throw apiUnavailableError('syncAccounts');
+    }
+    const data = await callSidecar<TrPortfolioData>(ctx, sidecar, 'portfolio');
+    if (Array.isArray(data?.accounts) && data.accounts.length > 0) {
+      return data.accounts.map(normalizeApiAccount);
+    }
+    // Repli : dériver les comptes des positions (espèces + titres) si le sidecar
+    // ne renvoie pas de bloc `accounts`.
+    const positions = expectArray<TradeRepublicSidecarPosition>(data, 'positions', 'portfolio');
+    if (positions.length === 0) {
+      return [];
+    }
+    return [
+      {
+        externalAccountId: ACCOUNT_SECURITIES,
+        name: 'Portefeuille Trade Republic',
+        type: 'SECURITIES',
+        currency: 'EUR',
+        rawSourceType: RAW_SOURCE_API,
+      },
+      {
+        externalAccountId: ACCOUNT_CASH,
+        name: 'Compte espèces Trade Republic',
+        type: 'CASH',
+        currency: 'EUR',
+        rawSourceType: RAW_SOURCE_API,
+      },
+    ];
   },
 
   async syncBalances(
-    _ctx: ConnectorContext,
+    ctx: ConnectorContext,
     _accounts: readonly NormalizedAccount[],
   ): Promise<readonly NormalizedBalance[]> {
-    throw fileOnlyError(PROVIDER_ID, 'syncBalances', this.importFormats);
+    const sidecar = activeSidecar(ctx);
+    if (!sidecar) throw apiUnavailableError('syncBalances');
+    const data = await callSidecar<TrCashData>(ctx, sidecar, 'cash');
+    return expectArray<TradeRepublicSidecarBalance>(data, 'balances', 'cash').map((balance) =>
+      normalizeApiBalance(balance, ctx.now()),
+    );
   },
 
   async syncPositions(
-    _ctx: ConnectorContext,
+    ctx: ConnectorContext,
     _accounts: readonly NormalizedAccount[],
   ): Promise<readonly NormalizedPosition[]> {
-    throw fileOnlyError(PROVIDER_ID, 'syncPositions', this.importFormats);
+    const sidecar = activeSidecar(ctx);
+    if (!sidecar) throw apiUnavailableError('syncPositions');
+    const data = await callSidecar<TrPositionsData>(ctx, sidecar, 'positions');
+    return expectArray<TradeRepublicSidecarPosition>(data, 'positions', 'positions').map(
+      normalizeApiPosition,
+    );
   },
 
   async syncTransactions(
-    _ctx: ConnectorContext,
-    _window: SyncWindow,
+    ctx: ConnectorContext,
+    window: SyncWindow,
   ): Promise<{ items: readonly NormalizedTransaction[]; cursor: SyncCursor }> {
-    throw fileOnlyError(PROVIDER_ID, 'syncTransactions', this.importFormats);
+    const sidecar = activeSidecar(ctx);
+    if (!sidecar) throw apiUnavailableError('syncTransactions');
+    const data = await callSidecar<TrTransactionsData>(ctx, sidecar, 'transactions', {
+      since: window.since ?? null,
+      cursor: window.cursor ?? null,
+    });
+    const raw = expectArray<TradeRepublicSidecarTransaction>(data, 'transactions', 'transactions');
+    const items: NormalizedTransaction[] = [];
+    let skipped = 0;
+    for (const entry of raw) {
+      const normalized = normalizeApiTransaction(entry);
+      if (normalized) items.push(normalized);
+      else skipped++;
+    }
+    if (skipped > 0) {
+      ctx.logger.warn(
+        `Sidecar Trade Republic : ${skipped} transaction(s) ignorée(s) faute de date ou de type exploitable.`,
+      );
+    }
+    return { items, cursor: { value: data.cursor ?? null } };
   },
 
   async syncIncome(
-    _ctx: ConnectorContext,
-    _window: SyncWindow,
+    ctx: ConnectorContext,
+    window: SyncWindow,
   ): Promise<readonly NormalizedIncome[]> {
-    throw fileOnlyError(PROVIDER_ID, 'syncIncome', this.importFormats);
+    const sidecar = activeSidecar(ctx);
+    if (!sidecar) throw apiUnavailableError('syncIncome');
+    const data = await callSidecar<TrIncomeData>(ctx, sidecar, 'income', {
+      since: window.since ?? null,
+    });
+    const raw = expectArray<TradeRepublicSidecarIncome>(data, 'income', 'income');
+    const items: NormalizedIncome[] = [];
+    let skipped = 0;
+    for (const entry of raw) {
+      const normalized = normalizeApiIncome(entry);
+      if (normalized) items.push(normalized);
+      else skipped++;
+    }
+    if (skipped > 0) {
+      ctx.logger.warn(
+        `Sidecar Trade Republic : ${skipped} revenu(s) ignoré(s) faute de date ou de type exploitable.`,
+      );
+    }
+    return items;
   },
 
-  async getSyncStatus(_ctx: ConnectorContext): Promise<SyncStatusReport> {
+  async getSyncStatus(ctx: ConnectorContext): Promise<SyncStatusReport> {
+    const sidecar = activeSidecar(ctx);
+    if (sidecar) {
+      return {
+        status: 'CONNECTED',
+        lastSyncAt: null,
+        message:
+          'Synchronisation automatique disponible via le sidecar « trade-republic » (lecture seule). ' +
+          'Aucune donnée n\'a encore été comparée à un compte réel.',
+        requiresUserAction: false,
+      };
+    }
     return {
       status: 'DISCONNECTED',
       lastSyncAt: null,
@@ -406,10 +913,48 @@ export const tradeRepublicConnector: Connector = {
   },
 };
 
+function isUserActionCode(code: string): boolean {
+  return code === 'AUTH_REQUIRED' || code === 'MFA_REQUIRED' || code === 'SESSION_EXPIRED';
+}
+
+/**
+ * Plans d'épargne (« savings plans ») — LECTURE SEULE, hors du contrat `Connector`.
+ * Renvoie un tableau vide si le sidecar n'est pas configuré.
+ */
+export async function fetchTradeRepublicSavingsPlans(
+  ctx: ConnectorContext,
+): Promise<readonly NormalizedSavingsPlan[]> {
+  const sidecar = activeSidecar(ctx);
+  if (!sidecar) return [];
+  const data = await callSidecar<TrSavingsPlansData>(ctx, sidecar, 'savingsplans');
+  return expectArray<TradeRepublicSidecarSavingsPlan>(data, 'savingsPlans', 'savingsplans').map(
+    (plan): NormalizedSavingsPlan => {
+      const isin = plan.isin?.trim() || null;
+      return {
+        externalAccountId: ACCOUNT_SECURITIES,
+        externalAssetId: isin,
+        isin,
+        name: plan.name?.trim() || isin || 'Plan d\'épargne Trade Republic',
+        amount: plan.amount,
+        interval: plan.interval?.trim() || 'UNKNOWN',
+        currency: readCurrencyValue(plan.currency),
+        active: plan.active !== false,
+        rawSourceType: RAW_SOURCE_API,
+      };
+    },
+  );
+}
+
 /** Surface interne exposée aux tests unitaires. */
 export const tradeRepublicInternals = {
   classifyTradeRepublicEn,
   classifyTradeRepublicDe,
+  normalizeApiAccount,
+  normalizeApiPosition,
+  normalizeApiTransaction,
+  normalizeApiIncome,
+  classifyTrIncome,
   RAW_SOURCE_EN,
   RAW_SOURCE_DE,
+  RAW_SOURCE_API,
 };

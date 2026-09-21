@@ -591,3 +591,110 @@ export function defaultEvmProviders(): readonly EvmDataProvider[] {
 export function providerMap(providers: readonly EvmDataProvider[] = defaultEvmProviders()): Map<string, EvmDataProvider> {
   return new Map(providers.map((provider) => [provider.name, provider]));
 }
+
+/* ------------------------------------------------------ registre + repli */
+
+export interface EvmFallbackFailure {
+  readonly provider: string;
+  readonly chain: string;
+  readonly kind: string;
+  readonly message: string;
+}
+
+export interface EvmFallbackResult<T> {
+  /** Provider qui a effectivement répondu. */
+  readonly provider: string;
+  readonly value: T;
+}
+
+export interface EvmQueryOptions<T> {
+  readonly chain: EvmChain;
+  /** Ordre de préférence (surcharge `config.providerOrder`). */
+  readonly order?: readonly string[];
+  /** Libellé de l'opération, pour les messages d'erreur. */
+  readonly operation: string;
+  /** Contexte par provider (la clé d'API dépend du provider). */
+  readonly context: (provider: EvmDataProvider) => EvmProviderContext;
+  readonly run: (provider: EvmDataProvider, context: EvmProviderContext) => Promise<T>;
+}
+
+export interface EvmProviderRegistryOptions {
+  readonly providers?: readonly EvmDataProvider[];
+  readonly order?: readonly string[];
+  /** Identifiant utilisé dans les `ConnectorError` (attribution). */
+  readonly owner?: string;
+}
+
+/**
+ * Registre de providers avec ordre de préférence configurable et repli
+ * automatique. Un provider qui ne supporte pas la chaîne, ou n'est pas
+ * disponible (clé absente), est simplement ignoré ; un provider qui ÉCHOUE
+ * cède la place au suivant. Si AUCUN ne répond, une erreur explicite est
+ * levée (jamais un résultat vide silencieux).
+ */
+export class EvmProviderRegistry {
+  readonly #providers: Map<string, EvmDataProvider>;
+  readonly #order: readonly string[];
+  readonly #owner: string;
+
+  constructor(options: EvmProviderRegistryOptions = {}) {
+    const providers = options.providers ?? defaultEvmProviders();
+    this.#providers = providerMap(providers);
+    this.#owner = options.owner ?? 'metamask';
+    const order = options.order ?? DEFAULT_PROVIDER_ORDER;
+    // On complète l'ordre avec les providers connus mais non listés, pour ne
+    // jamais en « perdre » un par une configuration partielle.
+    this.#order = [...new Set([...order, ...this.#providers.keys()])];
+  }
+
+  get order(): readonly string[] {
+    return this.#order;
+  }
+
+  get names(): readonly string[] {
+    return [...this.#providers.keys()];
+  }
+
+  /** Providers dans l'ordre effectif, pour une surcharge éventuelle. */
+  ordered(orderOverride?: readonly string[]): readonly EvmDataProvider[] {
+    const effective = orderOverride && orderOverride.length > 0 ? orderOverride : this.#order;
+    return effective
+      .map((name) => this.#providers.get(name))
+      .filter((provider): provider is EvmDataProvider => provider !== undefined);
+  }
+
+  /** Exécute une opération en essayant les providers dans l'ordre. */
+  async query<T>(options: EvmQueryOptions<T>): Promise<EvmFallbackResult<T>> {
+    const failures: EvmFallbackFailure[] = [];
+    let considered = 0;
+    for (const provider of this.ordered(options.order)) {
+      if (!provider.supportsChain(options.chain)) continue;
+      const context = options.context(provider);
+      if (!provider.isAvailable(context)) continue;
+      considered += 1;
+      try {
+        const value = await options.run(provider, context);
+        return { provider: provider.name, value };
+      } catch (error) {
+        const kind = error instanceof ConnectorError ? error.kind : 'DATA';
+        const raw = error instanceof Error ? error.message : 'erreur inconnue';
+        failures.push({ provider: provider.name, chain: options.chain.id, kind, message: redact(raw) });
+      }
+    }
+
+    if (considered === 0) {
+      throw new ConnectorError(
+        this.#owner,
+        'NOT_SUPPORTED',
+        `Aucun fournisseur disponible pour ${options.chain.name} (${options.operation}) : ` +
+          'configurez une clé d’API ou activez un autre provider.',
+      );
+    }
+    throw new ConnectorError(
+      this.#owner,
+      'PROVIDER_DOWN',
+      `Tous les fournisseurs ont échoué pour ${options.chain.name} (${options.operation}) : ` +
+        failures.map((failure) => `${failure.provider} (${failure.kind})`).join(', '),
+    );
+  }
+}

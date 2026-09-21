@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "transfers": [
+      {
+        "hash": "0xabababababababababababababababababababababababababababababababab",
+        "blockNum": "0x1406f42",
+        "from": "0x4444444444444444444444444444444444444444",
+        "to": "0x1111111111111111111111111111111111111111",
+        "value": 42.5,
+        "category": "erc20",
+        "rawContract": {
+          "address": "0x2222222222222222222222222222222222222222",
+          "value": "0x5f5e100",
+          "decimal": "0x6"
+        },
+        "metadata": {
+          "blockTimestamp": "2026-03-05T00:00:00.000Z",
+          "symbol": "USDC",
+          "name": "Exemple USD Coin",
+          "decimals": 6
+        }
+      }
+    ]
+  }
+}

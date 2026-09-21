@@ -11,29 +11,27 @@
  *    (voir `assertNoSigningMaterial`).
  *  - Aucune signature, aucun envoi de transaction, aucune autorisation de token
  *    (`approve`) n'est implémenté : ce fichier ne fait que LIRE des soldes et
- *    des historiques via des appels JSON-RPC/HTTP publics.
- *  - `capabilities.income = false` : les revenus on-chain ne sont pas
- *    interprétés ici, on ne devine pas.
+ *    des historiques via des providers d'exploration injectés.
+ *  - `capabilities.income = false` : les revenus on-chain ne sont pas devinés.
  *
  * ---------------------------------------------------------------------------
- * VÉRIFICATION DES POINTS D'ENTRÉE : UNVERIFIED — à ajuster quand le format
- * officieux est confirmé.
+ * CHEMIN API
  *
- *  - Solde natif : JSON-RPC `eth_getBalance` (standard EVM, stable par nature).
- *    Les URL par défaut sont des services publics NON contractuels, choisis
- *    parce qu'ils répondaient sans clé lors de la vérification du 2026-09-21
- *    (voir `CHAIN_ENDPOINTS`) : à surcharger via `config.rpcUrl`.
- *  - Jetons ERC-20 : API compatible Etherscan (`module=account&action=tokentx`).
- *    Le point d'entrée par défaut `https://api.etherscan.io/api` exige
- *    aujourd'hui une clé d'API pour la plupart des réseaux ; elle est lue de
- *    façon OPTIONNELLE dans les secrets (`explorerApiKey`) et n'est jamais
- *    journalisée. À surcharger via `config.explorerUrl` (ex. instance Blockscout
- *    compatible). Le nom des champs de réponse (`tokenSymbol`, `tokenDecimal`,
- *    `logIndex`...) suit la réponse Etherscan v1 et n'a pas été rejoué contre
- *    une réponse réelle ici.
+ *  - Multi-chaînes : `config.chains` (identifiants séparés par des virgules ;
+ *    défaut = les 7 réseaux du registre). La clé historique `config.chain` reste
+ *    acceptée pour un usage mono-chaîne.
+ *  - Providers interchangeables via `config.providerOrder` (défaut :
+ *    `etherscan, blockscout, routescan, alchemy`) avec repli automatique — voir
+ *    `evm/providers.ts`. Les clés d'API sont OPTIONNELLES et lues via
+ *    `ctx.secrets.get('etherscan_api_key' | 'alchemy_api_key' | ...)` ; le
+ *    serveur ajoute `SUIVIINVEST_KEY_*` en repli. Jamais journalisées.
+ *  - Progression incrémentale via `window.since` + curseur par chaîne ; une
+ *    chaîne en échec n'empêche pas les autres d'être remontées (reprise).
  *
- * Tout échec de forme (réponse non JSON, `result` non tableau) devient une
- * `ConnectorError` explicite plutôt qu'un tableau vide silencieux.
+ * ---------------------------------------------------------------------------
+ * VÉRIFICATION : AUCUN provider n'a été testé contre le service réel
+ * (`verifiedAgainstLiveService = false` partout). Seule la joignabilité HTTP de
+ * certains points d'entrée a été constatée le 2026-09-21.
  */
 
 import {
@@ -54,83 +52,40 @@ import {
   type SyncStatusReport,
   type SyncWindow,
 } from '../connector.ts';
-import { round, type ActivityType } from '@suiviinvest/core';
+import type { ActivityType } from '@suiviinvest/core';
+import { createAccumulator, pushActivity, pushPosition, rejectRow, toResult, warnOnce } from './shared.ts';
 import {
-  createAccumulator,
-  pushActivity,
-  pushPosition,
-  rejectRow,
-  toResult,
-  warnOnce,
-} from './shared.ts';
+  DEFAULT_CHAIN_IDS,
+  EVM_CHAINS,
+  EvmProviderRegistry,
+  normalizeChainActivity,
+  positionsFromBalances,
+  unitsToNumber,
+  type EvmChain,
+  type EvmDataProvider,
+  type EvmPage,
+  type EvmProviderContext,
+  type EvmTokenBalance,
+  type EvmTokenTransfer,
+  type EvmTransaction,
+} from '../evm/index.ts';
 
 const PROVIDER_ID = 'metamask' as const;
-const RAW_SOURCE_API = 'evm.explorer_api';
+const RAW_SOURCE_API = 'evm.onchain';
 const RAW_SOURCE_JSON = 'evm.address_json';
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 
+/** Taille de page par défaut des appels d'exploration. */
+const DEFAULT_PAGE_SIZE = 100;
+/** Garde-fou : nombre maximal de pages parcourues par opération et par chaîne. */
+const MAX_PAGES = 20;
+
 /**
- * Points d'entrée par défaut, par chaîne.
- *
- * Choix guidé par une vérification datée (audit du 2026-09-21) :
- *  - les endpoints JSON-RPC publics vérifiés RÉPONDANT ont été retenus ;
- *    plusieurs nœuds historiquement cités (`eth.llamarpc.com`, `rpc.ankr.com`,
- *    `polygon-rpc.com`, `cloudflare-eth.com`) refusent désormais `eth_getBalance`
- *    ou exigent une clé : ils ne doivent plus servir de défaut.
- *  - pour l'historique, Blockscout est préféré car il fonctionne SANS clé sur
- *    toutes les chaînes visées ; Etherscan ne reste pertinent (palier gratuit)
- *    que sur Ethereum, Arbitrum et Polygon, et exige une clé API ailleurs.
- *
- * Toute URL reste surchargeable via `config.rpcUrl` / `config.explorerUrl` :
- * l'utilisateur n'est jamais prisonnier d'un fournisseur.
+ * Registre par défaut, réutilisé pour toutes les connexions. Les providers sont
+ * sans état : l'adresse et la clé d'API arrivent dans le contexte d'appel.
  */
-interface ChainEndpoints {
-  readonly rpcUrl: string;
-  readonly explorerUrl: string;
-  readonly explorerKind: 'blockscout' | 'etherscan';
-}
-
-const CHAIN_ENDPOINTS: Readonly<Record<string, ChainEndpoints>> = {
-  ethereum: {
-    rpcUrl: 'https://ethereum-rpc.publicnode.com',
-    explorerUrl: 'https://eth.blockscout.com/api',
-    explorerKind: 'blockscout',
-  },
-  arbitrum: {
-    rpcUrl: 'https://arb1.arbitrum.io/rpc',
-    explorerUrl: 'https://arbitrum.blockscout.com/api',
-    explorerKind: 'blockscout',
-  },
-  optimism: {
-    rpcUrl: 'https://mainnet.optimism.io',
-    explorerUrl: 'https://optimism.blockscout.com/api',
-    explorerKind: 'blockscout',
-  },
-  base: {
-    rpcUrl: 'https://mainnet.base.org',
-    explorerUrl: 'https://base.blockscout.com/api',
-    explorerKind: 'blockscout',
-  },
-  polygon: {
-    rpcUrl: 'https://polygon-bor-rpc.publicnode.com',
-    explorerUrl: 'https://polygon.blockscout.com/api',
-    explorerKind: 'blockscout',
-  },
-  bnb: {
-    rpcUrl: 'https://bsc-dataseed.binance.org',
-    explorerUrl: 'https://api.etherscan.io/v2/api?chainid=56',
-    explorerKind: 'etherscan',
-  },
-  avalanche: {
-    rpcUrl: 'https://api.avax.network/ext/bc/C/rpc',
-    explorerUrl: 'https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api',
-    explorerKind: 'etherscan',
-  },
-};
-
-export const DEFAULT_CHAIN = 'ethereum';
-const FALLBACK_ENDPOINTS: ChainEndpoints = CHAIN_ENDPOINTS[DEFAULT_CHAIN] as ChainEndpoints;
+const DEFAULT_REGISTRY = new EvmProviderRegistry({ owner: PROVIDER_ID });
 
 /** Champs de configuration qui trahiraient du matériel de signature. */
 const FORBIDDEN_CONFIG_KEYS = [
@@ -157,7 +112,7 @@ export function assertNoSigningMaterial(config: Readonly<Record<string, string>>
         PROVIDER_ID,
         'DATA',
         `Configuration refusée : le champ « ${key} » ressemble à un secret de signature. ` +
-          'Ce connecteur est en LECTURE SEULE et n\'accepte qu\'une adresse publique.',
+          "Ce connecteur est en LECTURE SEULE et n'accepte qu'une adresse publique.",
       );
     }
   }
@@ -176,194 +131,165 @@ function requireAddress(ctx: ConnectorContext): string {
   return address.toLowerCase();
 }
 
-function chainEndpoints(ctx: ConnectorContext): ChainEndpoints {
-  const chain = (ctx.config.chain ?? DEFAULT_CHAIN).trim().toLowerCase();
-  return CHAIN_ENDPOINTS[chain] ?? FALLBACK_ENDPOINTS;
+function splitList(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(/[,\s]+/)
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== '');
 }
 
-function rpcUrl(ctx: ConnectorContext): string {
-  return (ctx.config.rpcUrl ?? '').trim() || chainEndpoints(ctx).rpcUrl;
-}
-
-function explorerUrl(ctx: ConnectorContext): string {
-  return (ctx.config.explorerUrl ?? '').trim() || chainEndpoints(ctx).explorerUrl;
-}
-
-/** Chaînes supportées nativement (sans configuration d'URL). */
-export const SUPPORTED_CHAINS: readonly string[] = Object.keys(CHAIN_ENDPOINTS);
-
-/* ------------------------------------------------------------ conversions */
-
-/** Convertit une quantité en base units (hex `0x…` ou décimal) vers un nombre décimal. */
-export function unitsToNumber(raw: string, decimals: number): number | null {
-  const text = raw.trim();
-  if (text === '') return null;
-  try {
-    // Etherscan renvoie des entiers DÉCIMAUX pour `value`, le JSON-RPC des
-    // valeurs HEXADÉCIMALES : les deux notations sont acceptées par BigInt.
-    const value = BigInt(text);
-    if (value < 0n) return null;
-    return bigintToNumber(value, decimals);
-  } catch {
-    return null;
+/** Chaînes configurées (défaut : les 7 du registre). */
+function configuredChains(ctx: ConnectorContext): EvmChain[] {
+  const explicit = splitList(ctx.config.chains);
+  const legacy = splitList(ctx.config.chain);
+  const ids = explicit.length > 0 ? explicit : legacy.length > 0 ? legacy : [...DEFAULT_CHAIN_IDS];
+  const chains: EvmChain[] = [];
+  const unknown: string[] = [];
+  for (const id of ids) {
+    const chain = EVM_CHAINS[id];
+    if (!chain) {
+      unknown.push(id);
+      continue;
+    }
+    if (!chains.some((existing) => existing.id === chain.id)) chains.push(chain);
   }
-}
-
-function bigintToNumber(value: bigint, decimals: number): number {
-  const base = 10n ** BigInt(decimals);
-  const whole = value / base;
-  const fraction = value % base;
-  return round(Number(whole) + Number(fraction) / Number(base), 8);
-}
-
-/* --------------------------------------------------------------- réseau */
-
-interface JsonRpcResponse {
-  readonly result?: unknown;
-  readonly error?: { code?: number; message?: string };
-}
-
-/** Solde natif en ETH (en lecture seule : `eth_getBalance`). */
-async function fetchNativeBalance(ctx: ConnectorContext, address: string): Promise<number> {
-  const payload = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'eth_getBalance',
-    params: [address, 'latest'],
-  };
-  const response = await ctx.http.json<JsonRpcResponse>(rpcUrl(ctx), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (response.error) {
-    throw new ConnectorError(
-      PROVIDER_ID,
-      'PROVIDER_BROKEN',
-      `Le nœud RPC a refusé eth_getBalance : ${redact(response.error.message ?? 'erreur inconnue')}`,
-    );
+  if (unknown.length > 0) {
+    ctx.logger.warn(`Chaînes EVM inconnues ignorées : ${unknown.join(', ')}`);
   }
-  if (typeof response.result !== 'string') {
-    throw new ConnectorError(
-      PROVIDER_ID,
-      'PROVIDER_BROKEN',
-      'Réponse RPC inattendue pour eth_getBalance (champ « result » absent ou non textuel).',
-    );
+  return chains;
+}
+
+function providerOrder(ctx: ConnectorContext): string[] | undefined {
+  const order = splitList(ctx.config.providerOrder);
+  return order.length > 0 ? order : undefined;
+}
+
+/** Noms de secrets acceptés par provider, dans l'ordre de résolution. */
+const PROVIDER_SECRETS: Readonly<Record<string, readonly string[]>> = {
+  etherscan: ['etherscan_api_key', 'explorerApiKey'],
+  blockscout: [],
+  routescan: ['routescan_api_key'],
+  alchemy: ['alchemy_api_key'],
+};
+
+async function apiKeyFor(ctx: ConnectorContext, provider: string): Promise<string | null> {
+  for (const name of PROVIDER_SECRETS[provider] ?? []) {
+    const value = await ctx.secrets.get(name);
+    if (value && value.trim() !== '') return value.trim();
   }
-  const balance = unitsToNumber(response.result, 18);
-  if (balance === null) {
-    throw new ConnectorError(
-      PROVIDER_ID,
-      'DATA',
-      `Solde natif illisible dans la réponse RPC : « ${redact(response.result)} »`,
-    );
+  return null;
+}
+
+/** Contexte d'appel par provider : la clé d'API dépend du provider visé. */
+async function buildContexts(ctx: ConnectorContext, address: string): Promise<Map<string, EvmProviderContext>> {
+  const contexts = new Map<string, EvmProviderContext>();
+  for (const name of DEFAULT_REGISTRY.names) {
+    contexts.set(name, {
+      http: ctx.http,
+      address,
+      apiKey: await apiKeyFor(ctx, name),
+      logger: ctx.logger,
+      now: ctx.now,
+    });
   }
-  return balance;
+  return contexts;
 }
 
-interface TokenTransfer {
-  readonly hash?: string;
-  readonly logIndex?: string;
-  readonly timeStamp?: string;
-  readonly from?: string;
-  readonly to?: string;
-  readonly contractAddress?: string;
-  readonly tokenName?: string;
-  readonly tokenSymbol?: string;
-  readonly tokenDecimal?: string;
-  readonly value?: string;
+function pageSize(ctx: ConnectorContext): number {
+  const parsed = Number(ctx.config.pageSize ?? DEFAULT_PAGE_SIZE);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 1000) : DEFAULT_PAGE_SIZE;
 }
 
-interface ExplorerResponse {
-  readonly status?: string;
-  readonly message?: string;
-  readonly result?: unknown;
-}
-
-async function fetchTokenTransfers(
+async function queryChain<T>(
   ctx: ConnectorContext,
   address: string,
-): Promise<readonly TokenTransfer[]> {
-  const params = new URLSearchParams({
-    module: 'account',
-    action: 'tokentx',
-    address,
-    page: '1',
-    offset: '200',
-    sort: 'asc',
+  chain: EvmChain,
+  operation: string,
+  run: (provider: EvmDataProvider, context: EvmProviderContext) => Promise<T>,
+): Promise<T> {
+  const contexts = await buildContexts(ctx, address);
+  const order = providerOrder(ctx);
+  const result = await DEFAULT_REGISTRY.query<T>({
+    chain,
+    ...(order ? { order } : {}),
+    operation,
+    context: (provider) => contexts.get(provider.name) as EvmProviderContext,
+    run: (provider, context) => run(provider, context),
   });
-  const apiKey = await ctx.secrets.get('explorerApiKey');
-  if (apiKey) params.set('apikey', apiKey);
-  const url = `${explorerUrl(ctx)}?${params.toString()}`;
-
-  const response = await ctx.http.json<ExplorerResponse>(url, { method: 'GET' });
-  if (Array.isArray(response.result)) return response.result as readonly TokenTransfer[];
-
-  const message = `${response.message ?? ''} ${String(response.result ?? '')}`;
-  if (/no\s+transactions/i.test(message)) return [];
-
-  throw new ConnectorError(
-    PROVIDER_ID,
-    'PROVIDER_BROKEN',
-    `L'explorateur n'a pas renvoyé de liste de transferts : ${redact(message.trim() || 'réponse vide')}`,
-  );
+  return result.value;
 }
 
-/* --------------------------------------------------------- normalisation */
+/* --------------------------------------------------------- pagination */
 
-function accountOf(address: string): NormalizedAccount {
-  return {
-    externalAccountId: address,
-    name: `Wallet ${address.slice(0, 6)}…${address.slice(-4)}`,
-    type: 'CRYPTO',
-    currency: 'ETH',
-    rawSourceType: 'evm.eoa',
-    balance: null,
-    isActive: true,
-  };
+interface ChainActivity {
+  readonly transfers: EvmTokenTransfer[];
+  readonly transactions: EvmTransaction[];
+  readonly lastBlock: number | null;
 }
 
-function transferToTransaction(transfer: TokenTransfer, address: string): NormalizedTransaction | null {
-  const decimals = Number(transfer.tokenDecimal ?? '0');
-  const raw = transfer.value ?? '';
-  const quantity = unitsToNumber(raw, Number.isFinite(decimals) ? decimals : 0);
-  if (quantity === null) return null;
+function trackBlock(current: number | null, candidate: number | null): number | null {
+  if (candidate === null) return current;
+  if (current === null || candidate > current) return candidate;
+  return current;
+}
 
-  const symbol = (transfer.tokenSymbol ?? 'TOKEN').toUpperCase();
-  const incoming = (transfer.to ?? '').toLowerCase() === address;
-  const timestamp = Number(transfer.timeStamp ?? '');
-  const date = Number.isFinite(timestamp) && timestamp > 0
-    ? new Date(timestamp * 1000).toISOString().slice(0, 10)
-    : null;
-  if (!date) return null;
+async function collectChainActivity(
+  ctx: ConnectorContext,
+  address: string,
+  chain: EvmChain,
+  startBlock: number | null,
+): Promise<ChainActivity> {
+  const size = pageSize(ctx);
+  const transfers: EvmTokenTransfer[] = [];
+  const transactions: EvmTransaction[] = [];
+  let lastBlock: number | null = null;
 
-  const signed = incoming ? quantity : -quantity;
-  const contract = (transfer.contractAddress ?? '').toLowerCase() || null;
+  let page = 1;
+  let hasMoreTransfers = true;
+  while (hasMoreTransfers && page <= MAX_PAGES) {
+    const result = await queryChain<EvmPage<EvmTokenTransfer>>(ctx, address, chain, 'getTokenTransfers', (provider, context) =>
+      provider.getTokenTransfers(context, chain, { page, pageSize: size, startBlock: startBlock ?? 0 }),
+    );
+    for (const transfer of result.items) {
+      transfers.push(transfer);
+      lastBlock = trackBlock(lastBlock, transfer.blockNumber);
+    }
+    hasMoreTransfers = result.hasMore;
+    page += 1;
+  }
 
+  let txPage = 1;
+  let hasMoreTransactions = true;
+  while (hasMoreTransactions && txPage <= MAX_PAGES) {
+    const result = await queryChain<EvmPage<EvmTransaction>>(ctx, address, chain, 'getTransactions', (provider, context) =>
+      provider.getTransactions(context, chain, { page: txPage, pageSize: size, startBlock: startBlock ?? 0 }),
+    );
+    for (const transaction of result.items) {
+      transactions.push(transaction);
+      lastBlock = trackBlock(lastBlock, transaction.blockNumber);
+    }
+    hasMoreTransactions = result.hasMore;
+    txPage += 1;
+  }
+
+  return { transfers, transactions, lastBlock };
+}
+
+/* ------------------------------------------------- normalisation on-chain */
+
+function chainNormalizer(ctx: ConnectorContext, accountId: string, chain: EvmChain) {
+  const stakingContracts = splitList(ctx.config.stakingContracts);
   return {
-    externalAccountId: address,
-    externalTransactionId: transfer.hash
-      ? `${transfer.hash}:${transfer.logIndex ?? '0'}`
-      : null,
-    externalAssetId: contract,
-    date,
-    type: 'CRYPTO_TRANSFER',
-    description: `${incoming ? 'Réception' : 'Envoi'} ${symbol} ${incoming ? 'de' : 'vers'} ${
-      incoming ? transfer.from ?? '?' : transfer.to ?? '?'
-    }`,
-    quantity,
-    unitPrice: null,
-    // Faute de cotation on-chain, le montant est exprimé dans l'unité du jeton
-    // (pas de conversion fiat inventée, pas de 0 trompeur).
-    amount: signed,
-    currency: symbol,
-    fees: 0,
-    taxes: 0,
+    accountId,
+    address: accountId,
+    chain,
+    ...(stakingContracts.length > 0 ? { stakingContracts } : {}),
     rawSourceType: RAW_SOURCE_API,
+    onSkip: (reason: string) => ctx.logger.warn(`[metamask] ${redact(reason)}`),
   };
 }
 
-/* ------------------------------------------------- import JSON (repli fichier) */
+/* ---------------------------------------------- import JSON (repli fichier) */
 
 interface AddressJsonToken {
   readonly contractAddress?: string;
@@ -520,6 +446,18 @@ export const metamaskAddressJsonFormat: ImportFormat = {
 
 /* -------------------------------------------------------------- connecteur */
 
+function accountOf(address: string, currency: string): NormalizedAccount {
+  return {
+    externalAccountId: address,
+    name: `Wallet ${address.slice(0, 6)}…${address.slice(-4)}`,
+    type: 'CRYPTO',
+    currency,
+    rawSourceType: 'evm.eoa',
+    balance: null,
+    isActive: true,
+  };
+}
+
 export const metamaskConnector: Connector = {
   id: PROVIDER_ID,
   displayName: 'Wallet EVM (MetaMask)',
@@ -529,22 +467,36 @@ export const metamaskConnector: Connector = {
     positions: true,
     transactions: true,
     income: false, // revenus on-chain non interprétés : on ne devine pas.
-    api: true, // chemin API PUBLIC implémenté (lecture d'adresse publique uniquement).
+    api: true, // chemin API public implémenté (lecture d'adresse publique uniquement).
   },
   importFormats: [metamaskAddressJsonFormat],
   requiredConfig: ['address'],
   // Aucun secret REQUIS : la lecture d'une adresse publique n'exige aucune clé.
-  // Une clé d'explorateur optionnelle peut être fournie sous « explorerApiKey ».
+  // Une clé d'explorateur OPTIONNELLE peut être fournie (voir PROVIDER_SECRETS).
   requiredSecrets: [],
 
   async testConnection(ctx: ConnectorContext): Promise<ConnectionTestResult> {
     try {
       const address = requireAddress(ctx);
-      const balance = await fetchNativeBalance(ctx, address);
+      const chains = configuredChains(ctx);
+      if (chains.length === 0) {
+        return {
+          ok: false,
+          status: 'DISCONNECTED',
+          message: 'Aucune chaîne EVM reconnue dans la configuration.',
+          requiresUserAction: false,
+        };
+      }
+      const first = chains[0] as EvmChain;
+      const balance = await queryChain(ctx, address, first, 'getNativeBalance', (provider, context) =>
+        provider.getNativeBalance(context, first),
+      );
       return {
         ok: true,
         status: 'CONNECTED',
-        message: `Adresse publique lue : solde natif ${balance} ETH (lecture seule).`,
+        message:
+          `Adresse publique lue : solde natif ${balance.quantity} ${balance.symbol} sur ${first.name} ` +
+          `(${chains.length} chaîne(s) configurée(s), lecture seule).`,
         requiresUserAction: false,
       };
     } catch (error) {
@@ -556,7 +508,10 @@ export const metamaskConnector: Connector = {
   },
 
   async syncAccounts(ctx: ConnectorContext): Promise<readonly NormalizedAccount[]> {
-    return [accountOf(requireAddress(ctx))];
+    const address = requireAddress(ctx);
+    const chains = configuredChains(ctx);
+    const currency = chains[0]?.nativeSymbol ?? 'ETH';
+    return [accountOf(address, currency)];
   },
 
   async syncBalances(
@@ -564,16 +519,27 @@ export const metamaskConnector: Connector = {
     accounts: readonly NormalizedAccount[],
   ): Promise<readonly NormalizedBalance[]> {
     const address = requireAddress(ctx);
+    const chains = configuredChains(ctx);
     const date = ctx.now().toISOString().slice(0, 10);
-    const native = await fetchNativeBalance(ctx, address);
-    const targets = accounts.length > 0 ? accounts : [accountOf(address)];
+    const first = chains[0];
+    if (!first) return [];
+    const targets = accounts.length > 0 ? accounts : [accountOf(address, first.nativeSymbol)];
+    if (chains.length > 1) {
+      // Une ligne de trésorerie ne porte qu'une devise : on expose le natif de la
+      // chaîne principale ; les autres soldes natifs sont des positions.
+      ctx.logger.warn(
+        `Wallet multi-chaînes : la trésorerie ne reflète que le solde natif de ${first.name} ; ` +
+          'les autres chaînes sont exposées en positions.',
+      );
+    }
+    const balance = await queryChain(ctx, address, first, 'getNativeBalance', (provider, context) =>
+      provider.getNativeBalance(context, first),
+    );
     return targets.map((account) => ({
       externalAccountId: account.externalAccountId,
       date,
-      // « Trésorerie » d'un wallet EVM = solde natif en ETH. Les jetons ERC-20
-      // sont exposés séparément comme positions (aucune somme inventée).
-      cash: native,
-      currency: account.currency,
+      cash: balance.quantity,
+      currency: first.nativeSymbol,
       rawSourceType: 'evm.eoa',
     }));
   },
@@ -583,64 +549,35 @@ export const metamaskConnector: Connector = {
     accounts: readonly NormalizedAccount[],
   ): Promise<readonly NormalizedPosition[]> {
     const address = requireAddress(ctx);
+    const chains = configuredChains(ctx);
     const accountId = accounts[0]?.externalAccountId ?? address;
-    const transfers = await fetchTokenTransfers(ctx, address);
-    const native = await fetchNativeBalance(ctx, address);
-
-    const aggregated = new Map<string, { symbol: string; name: string; decimals: number; quantity: number }>();
-    for (const transfer of transfers) {
-      const contract = (transfer.contractAddress ?? '').toLowerCase();
-      if (contract === '') continue;
-      const decimals = Number(transfer.tokenDecimal ?? '18');
-      const quantity = unitsToNumber(transfer.value ?? '0', Number.isFinite(decimals) ? decimals : 18);
-      if (quantity === null) continue;
-      const incoming = (transfer.to ?? '').toLowerCase() === address;
-      const entry = aggregated.get(contract) ?? {
-        symbol: (transfer.tokenSymbol ?? 'TOKEN').toUpperCase(),
-        name: transfer.tokenName ?? transfer.tokenSymbol ?? 'Jeton',
-        decimals: Number.isFinite(decimals) ? decimals : 18,
-        quantity: 0,
-      };
-      entry.quantity = round(entry.quantity + (incoming ? quantity : -quantity), 8);
-      aggregated.set(contract, entry);
-    }
-
     const positions: NormalizedPosition[] = [];
-    for (const [contract, entry] of aggregated) {
-      if (entry.quantity <= 0) continue;
-      positions.push({
-        externalAccountId: accountId,
-        externalAssetId: contract,
-        isin: null,
-        symbol: entry.symbol,
-        name: entry.name,
-        kind: 'CRYPTO',
-        quantity: entry.quantity,
-        unitPrice: null,
-        currency: entry.symbol,
-        chain: ctx.config.chain ?? 'ethereum',
-        contractAddress: contract,
-        decimals: entry.decimals,
-        rawSourceType: RAW_SOURCE_API,
-      });
-    }
 
-    if (native > 0) {
-      positions.push({
-        externalAccountId: accountId,
-        externalAssetId: null,
-        isin: null,
-        symbol: 'ETH',
-        name: 'Ether (solde natif)',
-        kind: 'CRYPTO',
-        quantity: native,
-        unitPrice: null,
-        currency: 'ETH',
-        chain: ctx.config.chain ?? 'ethereum',
-        contractAddress: null,
-        decimals: 18,
-        rawSourceType: RAW_SOURCE_API,
-      });
+    for (const chain of chains) {
+      let nativeQuantity: number | null = null;
+      try {
+        const native = await queryChain(ctx, address, chain, 'getNativeBalance', (provider, context) =>
+          provider.getNativeBalance(context, chain),
+        );
+        nativeQuantity = native.quantity;
+      } catch (error) {
+        ctx.logger.warn(
+          `Solde natif indisponible sur ${chain.name} : ${redact(error instanceof Error ? error.message : 'erreur inconnue')}`,
+        );
+      }
+
+      let tokens: readonly EvmTokenBalance[] = [];
+      try {
+        tokens = await queryChain(ctx, address, chain, 'getTokenBalances', (provider, context) =>
+          provider.getTokenBalances(context, chain),
+        );
+      } catch (error) {
+        ctx.logger.warn(
+          `Jetons indisponibles sur ${chain.name} : ${redact(error instanceof Error ? error.message : 'erreur inconnue')}`,
+        );
+      }
+
+      positions.push(...positionsFromBalances(chainNormalizer(ctx, accountId, chain), tokens, nativeQuantity));
     }
 
     return positions;
@@ -648,23 +585,53 @@ export const metamaskConnector: Connector = {
 
   async syncTransactions(
     ctx: ConnectorContext,
-    _window: SyncWindow,
+    window: SyncWindow,
   ): Promise<{ items: readonly NormalizedTransaction[]; cursor: SyncCursor }> {
     const address = requireAddress(ctx);
-    const transfers = await fetchTokenTransfers(ctx, address);
+    const chains = configuredChains(ctx);
+    const startBlocks = parseCursor(window.cursor);
     const items: NormalizedTransaction[] = [];
-    for (const transfer of transfers) {
-      const transaction = transferToTransaction(transfer, address);
-      if (transaction) {
-        items.push(transaction);
-      } else {
-        ctx.logger.warn(
-          `Transfert ignoré (données incomplètes) : hash ${redact(transfer.hash ?? 'inconnu')}`,
-        );
+    const blocks: Record<string, number | null> = {};
+    const failures: string[] = [];
+
+    for (const chain of chains) {
+      try {
+        const activity = await collectChainActivity(ctx, address, chain, startBlocks[chain.id] ?? null);
+        const normalized = normalizeChainActivity(chainNormalizer(ctx, address, chain), {
+          transfers: activity.transfers,
+          transactions: activity.transactions,
+        });
+        for (const transaction of normalized) {
+          if (window.since && transaction.date < window.since) continue;
+          items.push(transaction);
+        }
+        blocks[chain.id] = activity.lastBlock;
+      } catch (error) {
+        const message = redact(error instanceof Error ? error.message : 'erreur inconnue');
+        failures.push(`${chain.id}: ${message}`);
+        ctx.logger.warn(`Chaîne ${chain.name} ignorée pour cette synchronisation (reprise ultérieure) : ${message}`);
       }
     }
-    const last = transfers.at(-1);
-    return { items, cursor: { value: last?.hash ?? null } };
+
+    const seen = new Set<string>();
+    const deduped: NormalizedTransaction[] = [];
+    for (const transaction of items) {
+      const key =
+        transaction.externalTransactionId ?? `${transaction.date}|${transaction.type}|${transaction.amount}|${transaction.currency}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(transaction);
+    }
+
+    if (chains.length > 0 && failures.length === chains.length) {
+      throw new ConnectorError(
+        PROVIDER_ID,
+        'PROVIDER_DOWN',
+        `Aucune chaîne n'a pu être synchronisée. Détail : ${failures.join(' | ')}`,
+      );
+    }
+
+    return { items: deduped, cursor: { value: JSON.stringify(blocks) } };
   },
 
   async syncIncome(
@@ -679,10 +646,13 @@ export const metamaskConnector: Connector = {
   async getSyncStatus(ctx: ConnectorContext): Promise<SyncStatusReport> {
     try {
       const address = requireAddress(ctx);
+      const chains = configuredChains(ctx);
       return {
         status: 'CONNECTED',
         lastSyncAt: null,
-        message: `Lecture seule de l'adresse publique ${address}.`,
+        message: `Lecture seule de l'adresse publique ${address} sur ${chains.length} chaîne(s) : ${chains
+          .map((chain) => chain.name)
+          .join(', ')}.`,
         requiresUserAction: false,
       };
     } catch (error) {
@@ -694,15 +664,55 @@ export const metamaskConnector: Connector = {
   },
 };
 
-/** Surface interne exposée aux tests unitaires. */
+function parseCursor(cursor: string | null | undefined): Record<string, number> {
+  if (!cursor) return {};
+  try {
+    const parsed = JSON.parse(cursor) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const result: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'number' && Number.isFinite(value)) result[key] = value;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+/* ------------------------------------------------------ surface de test */
+
+/** Suivi des chaînes supportées (introspection et rétro-compatibilité). */
+export const SUPPORTED_CHAINS: readonly string[] = Object.keys(EVM_CHAINS);
+
+export const DEFAULT_CHAIN = 'ethereum';
+
+const CHAIN_ENDPOINTS: Readonly<
+  Record<string, { readonly rpcUrl: string; readonly explorerUrl: string; readonly explorerKind: string }>
+> = Object.fromEntries(
+  Object.entries(EVM_CHAINS).map(([id, chain]) => [
+    id,
+    { rpcUrl: chain.rpcUrl, explorerUrl: chain.explorerUrl, explorerKind: chain.explorerKind },
+  ]),
+);
+
+const FALLBACK_ENDPOINTS = CHAIN_ENDPOINTS[DEFAULT_CHAIN] as {
+  rpcUrl: string;
+  explorerUrl: string;
+  explorerKind: string;
+};
+
 export const metamaskInternals = {
   ADDRESS_PATTERN,
   FORBIDDEN_CONFIG_KEYS,
   assertNoSigningMaterial,
   unitsToNumber,
-  transferToTransaction,
+  configuredChains,
+  providerOrder,
+  parseCursor,
   SUPPORTED_CHAINS,
   CHAIN_ENDPOINTS,
   DEFAULT_CHAIN,
   DEFAULT_ENDPOINTS: FALLBACK_ENDPOINTS,
+  registry: DEFAULT_REGISTRY,
+  pageSize,
 };

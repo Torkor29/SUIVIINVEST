@@ -16,6 +16,7 @@ import { PropertyRepository } from './repositories/properties.ts';
 import { createLogger } from './logger.ts';
 import { registerAdminRoutes } from './routes/admin.ts';
 import { registerAuthRoutes, sendError } from './routes/auth.ts';
+import { registerManualRoutes } from './routes/manual.ts';
 import { registerWealthRoutes } from './routes/wealth.ts';
 import { AuthService, SESSION_COOKIE } from './security/sessions.ts';
 import { API_RATE_LIMIT, RateLimiter } from './security/rate-limit.ts';
@@ -226,6 +227,9 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   await registerAuthRoutes(app, { auth, audit });
   await registerWealthRoutes(app, { db, portfolio, crypto, realEstate, properties });
+  // Saisie manuelle : indispensable pour les sources qui ne fournissent pas les
+  // positions (Crédit Agricole) — l'utilisateur complète ce que l'API ne donne pas.
+  await registerManualRoutes(app, { db });
   await registerAdminRoutes(app, {
     db,
     registry,

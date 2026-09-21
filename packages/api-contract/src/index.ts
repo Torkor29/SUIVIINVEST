@@ -348,6 +348,24 @@ export interface CashFlowCreatedResponse {
   readonly accountId: string;
 }
 
+/* --------------------------------------------------- positions saisies à la main */
+
+export interface ManualPositionDto {
+  readonly activityId: string;
+  readonly accountId: string;
+  readonly instrumentId: string;
+  readonly isin: string | null;
+  readonly symbol: string | null;
+  readonly name: string;
+  readonly quantity: number;
+  readonly averageCost: number;
+  readonly costBasis: number;
+  readonly currency: string;
+  readonly date: string;
+  /** `CREATED` / `UPDATED` / `SKIPPED` lors d'une écriture, `null` en lecture. */
+  readonly outcome: 'CREATED' | 'UPDATED' | 'SKIPPED' | null;
+}
+
 /* ------------------------------------------------------- état des connexions */
 
 export interface ConnectionTestResultDto {

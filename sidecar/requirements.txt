@@ -1,0 +1,22 @@
+# Sidecars SuiviInvest — dépendances Python des connecteurs DEGIRO et Trade Republic.
+#
+# ⚠️ CES BIBLIOTHÈQUES PASSENT PAR DES API PRIVÉES NON OFFICIELLES. Elles peuvent
+# casser sans préavis (changement d'endpoint, WAF, version d'application épinglée)
+# et leur utilisation relève des conditions générales de DEGIRO / Trade Republic,
+# à la charge de l'utilisateur. Voir sidecar/README.md.
+
+# DEGIRO — API privée, licence BSD-3-Clause.
+#   https://pypi.org/project/degiro-connector/  (https://github.com/Chavithra/degiro-connector)
+# La version est épinglée au minimum connu comme fonctionnel : ne pas monter sans
+# vérifier la compatibilité des endpoints (v3/v4/v5/v6 dans les URLs).
+degiro-connector>=3.0.36
+
+# Trade Republic — API privée + WAF AWS, licence MIT.
+#   https://pypi.org/project/pytr/  (https://github.com/pytr-org/pytr)
+pytr>=0.4.10
+
+# Optionnel : le login « v1 » de pytr obtient le jeton AWS WAF via Playwright
+# (navigateur headless + téléchargement de Chromium). Le login « v2 » (utilisé par
+# ce sidecar, `use_v2_login=True`) n'en a pas besoin. Décommentez uniquement si
+# vous devez forcer le mode v1.
+# playwright>=1.40

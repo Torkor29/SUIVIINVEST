@@ -71,6 +71,8 @@ const FIELDS_ACCOUNT: Readonly<Record<string, FieldSpec>> = {
   currency: f('currency', 'devise'),
   state: f('state', 'statut', 'status'),
   balance: f('balance', 'solde'),
+  // Certains exports Revolut (multi-devises, échanges) portent le taux appliqué.
+  fxRate: f('fx rate', 'exchange rate', 'taux de change'),
 };
 
 /** Libellés du champ `Type` Revolut -> type canonique. */
@@ -81,9 +83,11 @@ const REVOLUT_TYPE_MAP: Readonly<Record<string, ActivityType>> = {
   'card refund': 'DEPOSIT',
   'direct debit': 'BANK_EXPENSE',
   'atm': 'WITHDRAWAL',
-  cashback: 'STAKING_REWARD',
-  reward: 'STAKING_REWARD',
-  rewards: 'STAKING_REWARD',
+  // Un cashback bancaire n'est PAS un reward de staking : le classer en revenu
+  // bancaire évite de polluer les rapports crypto avec des opérations de carte.
+  cashback: 'INTEREST',
+  reward: 'INTEREST',
+  rewards: 'INTEREST',
   fee: 'FEE',
   interest: 'INTEREST',
   dividend: 'DIVIDEND',
@@ -145,6 +149,8 @@ function parseAccountRow(row: CsvRowContext): void {
   }
 
   const fee = readNumber(record, mapping, 'fee');
+  const currency = readCurrency(record, mapping, 'currency', 'EUR') ?? 'EUR';
+  const fxRate = readNumber(record, mapping, 'fxRate');
 
   pushActivity(acc, {
     accountId: row.accountId,
@@ -152,7 +158,7 @@ function parseAccountRow(row: CsvRowContext): void {
     type: activityType,
     description: type ? `${description} (${type})` : description,
     amount,
-    currency: readCurrency(record, mapping, 'currency', 'EUR') ?? 'EUR',
+    currency,
     rawSourceType: RAW_SOURCE_ACCOUNT,
     externalTransactionId: null,
     externalAssetId: null,
@@ -160,6 +166,9 @@ function parseAccountRow(row: CsvRowContext): void {
     unitPrice: null,
     fees: fee === null ? 0 : Math.abs(fee),
     taxes: 0,
+    // Le montant reste dans sa devise d'origine ; le taux communiqué par le relevé
+    // est conservé pour que la conversion en euros soit exacte, pas approchée.
+    fxRate: fxRate !== null && fxRate > 0 ? fxRate : null,
   });
 }
 

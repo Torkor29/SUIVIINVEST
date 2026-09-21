@@ -177,6 +177,15 @@ export interface NormalizedTransaction {
   readonly fees: number;
   readonly taxes: number;
   readonly rawSourceType: string;
+  /**
+   * Taux de change appliqué par le fournisseur, quand il le communique
+   * (relevés Revolut multi-devises, exports Trade Republic...).
+   *
+   * Prioritaire sur le taux reconstitué depuis la table `fx_rates` : c'est le
+   * taux réellement appliqué à VOTRE opération, donc la seule valeur exacte.
+   * `null`/absent = l'application applique son propre taux daté.
+   */
+  readonly fxRate?: number | null;
 }
 
 export interface NormalizedIncome {
@@ -189,6 +198,8 @@ export interface NormalizedIncome {
   readonly currency: string;
   readonly withholdingTax: number;
   readonly rawSourceType: string;
+  /** Taux de change communiqué par la source, prioritaire sur le taux reconstitué. */
+  readonly fxRate?: number | null;
 }
 
 /* --------------------------------------------------------------- import fichier */

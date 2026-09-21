@@ -254,13 +254,18 @@ export class IngestService {
           : this.#maybeInstrumentForSecurity(transaction);
         if (instrumentId) instrumentsTouched++;
 
-        const matched = this.#matchFx(
-          transaction.amount,
-          transaction.currency,
-          rates,
-          transaction.date,
-          options.baseCurrency,
-        );
+        // Le taux communiqué par la source fait foi : c'est celui qui a réellement
+        // été appliqué à l'opération. Sinon, on cherche un taux daté en base.
+        const matched =
+          transaction.fxRate && transaction.fxRate > 0
+            ? { rate: transaction.fxRate, amount: transaction.amount * transaction.fxRate }
+            : this.#matchFx(
+                transaction.amount,
+                transaction.currency,
+                rates,
+                transaction.date,
+                options.baseCurrency,
+              );
         if (matched === null) {
           warnings.push(
             `Taux ${transaction.currency}->${options.baseCurrency} indisponible au ${transaction.date} : ` +
@@ -331,8 +336,10 @@ export class IngestService {
           importId: options.importId,
           lastSyncedAt: (options.now ?? new Date()).toISOString(),
           fxRateToBase:
-            this.#matchFx(income.amount, income.currency, rates, income.date, options.baseCurrency)?.rate ??
-            null,
+            income.fxRate && income.fxRate > 0
+              ? income.fxRate
+              : this.#matchFx(income.amount, income.currency, rates, income.date, options.baseCurrency)
+                  ?.rate ?? null,
         });
         if (result.outcome === 'CREATED') created++;
         else if (result.outcome === 'UPDATED') updated++;
