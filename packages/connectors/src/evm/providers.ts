@@ -267,7 +267,7 @@ function createEtherscanStyleProvider(options: EtherscanStyleOptions): EvmDataPr
       // Aucun endpoint « soldes de jetons » dans le palier gratuit : on agrège
       // les transferts du wallet. Résultat déterministe, jamais inventé.
       const page = await this.getTokenTransfers(ctx, chain, { pageSize: 500 });
-      const totals = new Map<string, EvmTokenBalance>();
+      const totals = new Map<string, { contractAddress: string; symbol: string; name: string; decimals: number; quantity: number }>();
       for (const transfer of page.items) {
         const key = transfer.contractAddress.toLowerCase();
         const entry = totals.get(key) ?? {

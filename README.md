@@ -53,6 +53,78 @@ et liquidités, réunis dans une seule vue.
 Chaque connecteur déclare honnêtement ses capacités : l'interface indique « Import de fichiers
 uniquement » quand aucune API exploitable n'existe, plutôt que de laisser croire le contraire.
 
+
+---
+
+## Synchronisation : ce qui remonte tout seul, et ce qui ne peut pas
+
+L'application distingue trois niveaux, et l'interface l'affiche sans détour :
+
+| Niveau | Signification |
+| --- | --- |
+| **Automatique** | La source est interrogée par l'application et les données remontent seules. |
+| **Automatique sous condition** | Une action humaine est nécessaire à chaque session (validation dans l'app du fournisseur, code à usage unique). L'interface affiche « Validation requise » et la synchronisation **reprend après validation**. |
+| **Import seul** | Aucun accès automatique légitime n'existe : l'import de fichier est la voie normale, pas un pis-aller. |
+
+### Statuts affichés par source
+
+- **Connecté** — identifiants valides, dernière synchronisation réussie.
+- **En cours** — synchronisation en cours, avec progression et compteurs en direct.
+- **Synchronisé** — terminé : « 37 transactions récupérées, 12 positions mises à jour, 0 doublon créé ».
+- **Validation requise** — une action de votre part est attendue (validation dans l'app, code, captcha). Le message dit précisément quoi faire.
+- **Erreur** — message compréhensible ; le détail technique est disponible dans un bloc repliable, jamais affiché brut.
+- **Non configuré** — aucun accès enregistré pour cette source.
+
+### Une panne n'empêche pas les autres
+
+« Synchroniser tout » lance chaque source **indépendamment**. Une source en échec, en attente de
+validation ou non configurée n'empêche jamais les autres de remonter. Le résumé final liste le
+résultat de chacune. Chaque exécution est conservée avec : source, début, fin, statut, éléments
+créés, mis à jour, ignorés, code d'erreur et message.
+
+### Relevés et historique : ne pas confondre
+
+- **Historique reconstruit** : recalculé depuis vos opérations et les cours historiques. Utile,
+  mais c'est une reconstitution.
+- **Relevés enregistrés** : la valeur réellement observée par l'application, un point par jour
+  (valeur totale, par compte, par classe d'actif, par établissement, dettes, patrimoine net).
+
+L'interface indique toujours de quoi il s'agit. Aucun relevé n'est inventé : si l'historique
+antérieur n'est pas disponible, il est marqué comme reconstruit et rien n'est extrapolé.
+
+### Transfers internes
+
+Un virement entre deux de vos comptes (Revolut → DEGIRO, par exemple) n'est **ni un revenu ni une
+performance** : le patrimoine total est inchangé, et seule la répartition par établissement bouge.
+C'est vérifié par test de bout en bout.
+
+### Clés d'API et sidecars
+
+Aucune clé n'est obligatoire pour les wallets EVM : les nœuds publics et les explorateurs
+Blockscout répondent sans clé. Une clé (Etherscan, Alchemy) améliore la fiabilité de l'historique.
+
+Les sources qui dépendent de bibliothèques non officielles (DEGIRO, Trade Republic) passent par un
+**sidecar** : un processus séparé, isolé, qui n'expose que des opérations de lecture. Le détail est
+dans `docs/connectors/sidecars.md`, l'activation dans `.env`.
+
+---
+
+## Ce qui n'a pas été vérifié contre un service réel
+
+Par honnêteté, et parce qu'il vaut mieux le savoir avant de compter sur une source :
+
+- Les accès **réels** à DEGIRO, Trade Republic, Crédit Agricole et Revolut n'ont pas pu être
+  testés (aucun identifiant personnel disponible). Le code, les interfaces, les formats et les
+  cas d'erreur sont couverts par des tests **hors ligne** sur fixtures ; les appels aux services
+  eux-mêmes restent à valider lors de votre première connexion.
+- Les formats d'export Crédit Agricole et Revolut ne sont pas documentés publiquement : les
+  lecteurs sont tolérants et signalent explicitement les colonnes non reconnues, mais un ajustement
+  peut être nécessaire au premier import.
+- Les fournisseurs d'indexation EVM gratuits limitent l'historique (Etherscan palier gratuit :
+  Ethereum, Arbitrum, Polygon uniquement) : sur les autres chaînes, Blockscout est utilisé.
+
+Ces limites sont aussi écrites dans le code, aux endroits concernés.
+
 ---
 
 ## Déploiement sur Ubuntu (pas à pas)

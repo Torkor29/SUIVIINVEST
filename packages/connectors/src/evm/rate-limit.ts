@@ -137,9 +137,9 @@ export interface ProviderHttpOptions {
 }
 
 export interface AttemptRecord {
-  readonly url: string;
-  readonly attempt: number;
-  readonly status: number;
+  url: string;
+  attempt: number;
+  status: number;
 }
 
 function isRetryableStatus(status: number): boolean {
@@ -213,7 +213,7 @@ export class ProviderHttpClient {
       }
 
       const record = this.attempts[this.attempts.length - 1];
-      if (record) (record as { status: number }).status = response.status;
+      if (record) record.status = response.status;
 
       if (isRetryableStatus(response.status) && attempt < this.#retry.maxRetries) {
         const delay = this.#delay(attempt, response.headers);
