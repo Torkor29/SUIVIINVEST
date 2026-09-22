@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { ImportAnalyzeResponse, ImportCommitResponse, ImportHistoryDto } from '@suiviinvest/api-contract';
+import { plural } from '@suiviinvest/core/text';
+import type { AccountsResponse, ImportAnalyzeResponse, ImportCommitResponse, ImportHistoryDto } from '@suiviinvest/api-contract';
 import { request } from '../../lib/api.ts';
 import { useAsync } from '../../lib/useAsync.ts';
 import { useAction } from '../../lib/useAction.ts';
@@ -16,9 +17,13 @@ export function ImportPanel() {
   const [content, setContent] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<ImportAnalyzeResponse | null>(null);
   const [result, setResult] = useState<ImportCommitResponse | null>(null);
+  // Le compte cible est OBLIGATOIRE côté serveur : un relevé sans compte de
+  // destination serait refusé, donc l'interface le demande explicitement.
+  const [accountId, setAccountId] = useState<string>('');
   const analyze = useAction();
   const commit = useAction();
   const history = useAsync<readonly ImportHistoryDto[]>((signal) => request<readonly ImportHistoryDto[]>('/api/imports', { signal }), []);
+  const accounts = useAsync<AccountsResponse>((signal) => request<AccountsResponse>('/api/accounts', { signal }), []);
 
   const onFile = async (file: File): Promise<void> => {
     const text = await file.text();
@@ -29,10 +34,18 @@ export function ImportPanel() {
     await analyze.run(async () => {
       const response = await request<ImportAnalyzeResponse>('/api/imports/analyze', {
         method: 'POST',
-        json: { filename: file.name, content: text },
+        json: {
+          filename: file.name,
+          content: text,
+          ...(accountId === '' ? {} : { accountId }),
+        },
       });
       setAnalysis(response);
-      return `${response.summary.parsed} lignes analysées — ${response.summary.new} nouvelles, ${response.summary.duplicates} doublons.`;
+      return (
+        `${plural(response.summary.parsed, 'ligne analysée', 'lignes analysées')} — ` +
+        `${plural(response.summary.new, 'nouvelle', 'nouvelles')}, ` +
+        `${plural(response.summary.duplicates, 'doublon', 'doublons')}.`
+      );
     });
   };
 
@@ -41,11 +54,13 @@ export function ImportPanel() {
     void commit.run(async () => {
       const response = await request<ImportCommitResponse>('/api/imports/commit', {
         method: 'POST',
-        json: { filename, content, dryRun },
+        json: { filename, content, dryRun, ...(accountId === '' ? {} : { accountId }) },
       });
       setResult(response);
       history.reload();
-      return response.message;
+      // Le retour DURABLE est rendu plus bas (`import-outcome`) : renvoyer le
+      // message ici l'afficherait une seconde fois, juste au-dessus.
+      return null;
     });
   };
 
@@ -83,6 +98,22 @@ export function ImportPanel() {
         subtitle="CSV ou export d’agrégateur : le fichier est analysé avant toute écriture (doublons détectés par empreinte)."
       >
         <div className="filters">
+          <label className="field">
+            <span className="field-label">Compte cible</span>
+            <select
+              className="input"
+              data-testid="import-account"
+              value={accountId}
+              onChange={(event) => setAccountId(event.target.value)}
+            >
+              <option value="">— choisir un compte —</option>
+              {(accounts.data?.accounts ?? []).map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name} ({account.providerId})
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field field-grow">
             <span className="field-label">Fichier de relevé</span>
             <input
@@ -95,15 +126,32 @@ export function ImportPanel() {
               }}
             />
           </label>
-          <button type="button" className="btn btn-ghost" disabled={analysis === null || commit.pending} onClick={() => submit(true)}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            data-testid="import-dry-run"
+            disabled={analysis === null || commit.pending || accountId === ''}
+            onClick={() => submit(true)}
+          >
             Simuler l’import
           </button>
-          <button type="button" className="btn btn-primary" disabled={analysis === null || commit.pending} onClick={() => submit(false)}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            data-testid="import-commit"
+            disabled={analysis === null || commit.pending || accountId === ''}
+            onClick={() => submit(false)}
+          >
             Valider l’import
           </button>
         </div>
         <ActionFeedback state={analyze} />
         <ActionFeedback state={commit} />
+        {accounts.data !== null && accounts.data.accounts.length === 0 && (
+          <p className="muted small">
+            Aucun compte disponible&nbsp;: créez une connexion puis synchronisez-la avant d’importer un relevé.
+          </p>
+        )}
         {filename !== null && <p className="muted small">Fichier sélectionné&nbsp;: {filename}</p>}
 
         {analysis !== null && (
@@ -121,7 +169,11 @@ export function ImportPanel() {
             <DataTable rows={analysis.rows} columns={previewColumns} rowKey={(row) => `line-${row.line}`} maxRows={40} emptyTitle="Aucune ligne analysée" />
           </>
         )}
-        {result !== null && <p className="feedback feedback-ok">{result.message}</p>}
+        {result !== null && (
+          <p className="feedback feedback-ok" data-testid="import-outcome" role="status">
+            {result.message}
+          </p>
+        )}
       </Card>
 
       <Card title="Historique des imports" subtitle="Traçabilité des fichiers déjà chargés." padded={false}>

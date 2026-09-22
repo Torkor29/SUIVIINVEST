@@ -393,6 +393,26 @@ export interface ValuationInput {
   readonly currency: string;
   readonly source: 'MARKET' | 'MANUAL' | 'APPRAISAL' | 'CONNECTOR';
   readonly note?: string | null;
+  /** Quantité détenue, quand la source la communique (positions crypto/titres). */
+  readonly quantity?: number | null;
+  /** Prix unitaire communiqué par la source, quand elle le connaît. */
+  readonly unitPrice?: number | null;
+}
+
+/** Position connue d'un compte, telle que la source l'a communiquée. */
+export interface PositionValuationRow {
+  readonly instrumentId: string;
+  readonly symbol: string | null;
+  readonly name: string;
+  readonly kind: string;
+  readonly chain: string | null;
+  readonly contractAddress: string | null;
+  readonly quantity: number | null;
+  readonly unitPrice: number | null;
+  readonly value: number;
+  readonly currency: string;
+  readonly date: string;
+  readonly source: string;
 }
 
 export class ValuationRepository {
@@ -405,11 +425,13 @@ export class ValuationRepository {
   /** Une seule valeur par (compte, instrument, date) : la dernière écriture gagne. */
   upsert(input: ValuationInput): void {
     this.#db.run(
-      `INSERT INTO valuations (id, account_id, instrument_id, date, value, currency, source, note, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO valuations
+         (id, account_id, instrument_id, date, value, currency, source, note, created_at, quantity, unit_price)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(account_id, COALESCE(instrument_id,''), date) DO UPDATE SET
          value = excluded.value, currency = excluded.currency, source = excluded.source,
-         note = excluded.note, created_at = excluded.created_at`,
+         note = excluded.note, created_at = excluded.created_at,
+         quantity = excluded.quantity, unit_price = excluded.unit_price`,
       randomUUID(),
       input.accountId,
       input.instrumentId,
@@ -419,6 +441,31 @@ export class ValuationRepository {
       input.source,
       input.note ?? null,
       new Date().toISOString(),
+      input.quantity ?? null,
+      input.unitPrice ?? null,
+    );
+  }
+
+  /**
+   * Dernière position connue par instrument d'un compte (positions ≠ soldes de
+   * trésorerie) : c'est la source de vérité pour un portefeuille observé par
+   * adresse, dont l'historique de transactions ne suffit pas à reconstituer.
+   */
+  latestPositionsForAccount(accountId: string): PositionValuationRow[] {
+    return this.#db.all<PositionValuationRow>(
+      `SELECT v.instrument_id AS instrumentId, i.symbol, i.name, i.kind,
+              i.chain, i.contract_address AS contractAddress,
+              v.quantity, v.unit_price AS unitPrice, v.value, v.currency, v.date, v.source
+         FROM valuations v
+         JOIN instruments i ON i.id = v.instrument_id
+        WHERE v.account_id = ?
+          AND v.instrument_id IS NOT NULL
+          AND v.date = (
+            SELECT MAX(v2.date) FROM valuations v2
+             WHERE v2.account_id = v.account_id AND v2.instrument_id = v.instrument_id
+          )
+        ORDER BY v.value DESC`,
+      accountId,
     );
   }
 

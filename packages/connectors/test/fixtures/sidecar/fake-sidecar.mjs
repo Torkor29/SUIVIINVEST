@@ -108,6 +108,7 @@ const TRADE_REPUBLIC = {
   portfolio: {
     accounts: [
       { id: 'securities', name: 'Portefeuille Trade Republic', currency: 'EUR', type: 'SECURITIES', balance: 1200 },
+      { id: 'cash', name: 'Compte espèces Trade Republic', currency: 'EUR', type: 'CASH', balance: 500.25 },
     ],
     positions: [
       {

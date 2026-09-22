@@ -2,6 +2,7 @@ import {
   ConnectorError,
   type Connector,
   type ConnectorContext,
+  type ImportFormat,
   type NormalizedAccount,
   type NormalizedPosition,
   type NormalizedTransaction,
@@ -33,6 +34,89 @@ interface FakeSpec {
 
 const TODAY = '2026-09-21';
 
+/**
+ * Format d'import CSV des doublures E2E.
+ *
+ * Il reproduit le strict nécessaire d'un relevé : entête
+ * `date;type;description;amount;currency`, séparateur point-virgule. Le
+ * suffixe `-generic-csv` le rend éligible au repli de l'analyse d'import, ce qui
+ * permet à Playwright de couvrir le parcours d'import sans dépendre d'un
+ * fournisseur réel.
+ */
+const E2E_CSV_FORMAT: ImportFormat = {
+  id: 'e2e-generic-csv',
+  label: 'Relevé CSV (données de test)',
+  kind: 'CSV',
+  detect(content: string): number {
+    const header = (content.split(/\r?\n/)[0] ?? '').toLowerCase();
+    const hasDate = header.includes('date');
+    const hasAmount = header.includes('amount') || header.includes('montant');
+    return hasDate && hasAmount ? 0.9 : 0;
+  },
+  parse(content: string) {
+    const lines = content.split(/\r?\n/).filter((line) => line.trim() !== '');
+    const header = (lines[0] ?? '').split(';').map((cell) => cell.trim().toLowerCase());
+    const indexOf = (name: string): number => header.indexOf(name);
+    const cell = (cells: readonly string[], name: string): string => {
+      const index = indexOf(name);
+      return index >= 0 ? (cells[index] ?? '').trim() : '';
+    };
+    const numberOrNull = (raw: string): number | null => {
+      if (raw === '') return null;
+      const parsed = Number.parseFloat(raw.replace(/\s/g, '').replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const transactions: NormalizedTransaction[] = [];
+    const errors: { line: number; reason: string }[] = [];
+
+    for (let index = 1; index < lines.length; index += 1) {
+      const cells = (lines[index] ?? '').split(';');
+      const date = cell(cells, 'date');
+      const amount = numberOrNull(cell(cells, 'amount') || cell(cells, 'montant'));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || amount === null) {
+        errors.push({ line: index + 1, reason: 'date ou montant illisible' });
+        continue;
+      }
+      const rawType = (cell(cells, 'type') || 'ACHAT').toUpperCase();
+      const type =
+        rawType === 'DIVIDENDE' || rawType === 'DIVIDEND'
+          ? 'DIVIDEND'
+          : rawType === 'ACHAT' || rawType === 'BUY'
+            ? 'BUY'
+            : rawType === 'VENTE' || rawType === 'SELL'
+              ? 'SELL'
+              : 'DEPOSIT';
+      const isin = cell(cells, 'isin') || null;
+      transactions.push({
+        externalAccountId: cell(cells, 'account') || 'E2E-IMPORT',
+        externalTransactionId: cell(cells, 'id') || null,
+        externalAssetId: isin,
+        date,
+        type,
+        description: cell(cells, 'description') || type,
+        quantity: numberOrNull(cell(cells, 'quantity')),
+        unitPrice: numberOrNull(cell(cells, 'unit_price')),
+        amount,
+        currency: (cell(cells, 'currency') || 'EUR').toUpperCase(),
+        fees: 0,
+        taxes: 0,
+        rawSourceType: 'E2E',
+      });
+    }
+
+    return {
+      transactions,
+      income: [],
+      positions: [],
+      detectedColumns: header,
+      unmappedColumns: [],
+      warnings: [],
+      errors,
+    };
+  },
+};
+
 function spec(input: FakeSpec): Connector {
   return {
     id: input.id,
@@ -45,7 +129,8 @@ function spec(input: FakeSpec): Connector {
       income: true,
       api: true,
     },
-    importFormats: [],
+    // Le format CSV de test, partagé par toutes les doublures.
+    importFormats: [E2E_CSV_FORMAT],
     requiredConfig: [],
     requiredSecrets: [],
     async testConnection() {

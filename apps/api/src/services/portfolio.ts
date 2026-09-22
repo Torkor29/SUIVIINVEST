@@ -45,7 +45,7 @@ import type {
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 import type { Db } from '../db/database.ts';
 import { AccountRepository, InstrumentRepository, type AccountRow } from '../repositories/accounts.ts';
-import { ActivityRepository, toDomainActivity, type ActivityQuery, type ActivityRow } from '../repositories/activities.ts';
+import { ActivityRepository, toDomainActivity, ValuationRepository, type ActivityQuery, type ActivityRow } from '../repositories/activities.ts';
 import { MarketRepository } from '../repositories/market.ts';
 import { PropertyRepository } from '../repositories/properties.ts';
 
@@ -115,6 +115,7 @@ export class PortfolioService {
   readonly #accounts: AccountRepository;
   readonly #instruments: InstrumentRepository;
   readonly #activities: ActivityRepository;
+  readonly #valuations: ValuationRepository;
   readonly #market: MarketRepository;
   readonly #properties: PropertyRepository;
   readonly #baseCurrency: string;
@@ -124,6 +125,7 @@ export class PortfolioService {
     this.#accounts = new AccountRepository(db);
     this.#instruments = new InstrumentRepository(db);
     this.#activities = new ActivityRepository(db);
+    this.#valuations = new ValuationRepository(db);
     this.#market = new MarketRepository(db);
     this.#properties = new PropertyRepository(db);
     this.#baseCurrency = options.baseCurrency;
@@ -921,9 +923,6 @@ export class PortfolioService {
 
     // Titres / crypto : positions calculées, valorisées au dernier cours connu.
     const activityRows = this.#activities.listForAccount(account.id);
-    if (activityRows.length === 0) {
-      return { value: 0, cash: 0, invested: 0, unrealizedPnl: 0, realizedPnl: 0 };
-    }
     const domain = activityRows.map((row) => toDomainActivity(row, account.currency));
     const lastPrices: Record<string, number> = {};
     for (const activity of domain) {
@@ -932,6 +931,37 @@ export class PortfolioService {
       if (quote) lastPrices[activity.instrumentId] = quote.close;
     }
     const calc = computePositions({ activities: domain, lastPrices, currency: account.currency });
+    const cost = round(sum(calc.positions.map((position) => position.costBasis)));
+
+    // Wallet observé par adresse : la dernière position COMMUNIQUÉE PAR LA SOURCE
+    // fait foi. C'est indispensable pour les jetons natifs (ETH, POL…), qui n'ont
+    // pas d'adresse de contrat : l'historique des transactions ne permet pas de
+    // les rattacher à un jeton, donc il les perdait et affichait « — ».
+    if (account.type === 'CRYPTO') {
+      const declared = this.#valuations.latestPositionsForAccount(account.id);
+      if (declared.length > 0) {
+        let value = 0;
+        for (const position of declared) {
+          if (position.quantity === null || position.quantity <= 0) continue;
+          const quote = latestQuotes.get(position.instrumentId);
+          const price = quote ? quote.close : position.unitPrice;
+          value += price === null ? position.value : position.quantity * price;
+        }
+        // Aucun coût de revient n'est fourni par un scan d'adresse : la
+        // plus-value latente reste celle reconstituée depuis l'historique.
+        return {
+          value: round(value),
+          cash: 0,
+          invested: cost,
+          unrealizedPnl: round(value - cost),
+          realizedPnl: calc.realizedPnl,
+        };
+      }
+    }
+
+    if (activityRows.length === 0) {
+      return { value: 0, cash: 0, invested: 0, unrealizedPnl: 0, realizedPnl: 0 };
+    }
     const marketValue = round(sum(calc.positions.map((position) => position.marketValue)));
     // Le cash résiduel d'un compte-titres (espèces non investies) est inclus.
     const cashPart = this.#db.get<{ total: number | null }>(
@@ -939,7 +969,6 @@ export class PortfolioService {
       account.id,
     );
     const cash = round(cashPart?.total ?? 0);
-    const cost = round(sum(calc.positions.map((position) => position.costBasis)));
     return {
       value: round(marketValue + cash),
       cash,

@@ -108,6 +108,10 @@ export function netWorthResponse(period: PeriodKey = '1Y', now: Date = new Date(
   const variations = variationsFromSeries(fullSeries, now);
   return {
     asOf: toIsoDay(now),
+    // La maquette mélange un historique reconstruit depuis les opérations et des
+    // relevés réellement enregistrés : elle se déclare donc `MIXED`.
+    historySource: 'MIXED',
+    recordedSince: '2026-09-01',
     currency: 'EUR',
     total: currentNetWorthEur(now),
     variationToday: variations.today,

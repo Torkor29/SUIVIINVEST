@@ -82,6 +82,22 @@ validation ou non configurée n'empêche jamais les autres de remonter. Le résu
 résultat de chacune. Chaque exécution est conservée avec : source, début, fin, statut, éléments
 créés, mis à jour, ignorés, code d'erreur et message.
 
+### Positions crypto : la source fait foi
+
+Un portefeuille est observé **par adresse publique**, jamais par clé privée. Or un jeton natif
+(ETH, POL…) n'a pas d'adresse de contrat : rejouer l'historique des transactions ne suffit pas à
+savoir combien vous détenez, et une transaction entrante seule ne dit pas à quel jeton elle
+correspond. L'application applique donc cette règle :
+
+1. la **dernière position communiquée par la source** fait foi (jeton, chaîne, quantité, prix) —
+   c'est ce que la vue Crypto et le patrimoine net utilisent ;
+2. à défaut seulement, les positions sont **reconstituées depuis l'historique**, valorisées au
+   dernier cours connu.
+
+Conséquence assumée : une position sans cours connu est valorisée à la dernière valeur
+communiquée par la source, et l'avertissement correspondant est affiché — jamais un zéro silencieux
+ni un jeton « — ».
+
 ### Relevés et historique : ne pas confondre
 
 - **Historique reconstruit** : recalculé depuis vos opérations et les cours historiques. Utile,
@@ -355,7 +371,7 @@ docker run --rm -v suiviinvest-backups:/backups node:24-bookworm-slim \
 
 ```bash
 npm install
-npm test          # 100 tests (domaine + API), aucun réseau, aucun identifiant
+npm test          # 246 tests (domaine + connecteurs + API), aucun réseau, aucun identifiant
 npm run typecheck # TypeScript strict, aucun `any`
 npm run dev:api   # API sur :9123 (rechargement automatique)
 npm run dev:web   # frontend Vite sur :5173
@@ -376,14 +392,41 @@ docs/                  Architecture, notes de conception, veille sur les connect
 ### Tests
 
 ```bash
-npm test                                  # tout
-npm run test:core                         # domaine : 67 tests
-npm run test:api                          # API + intégration : 33 tests
+npm test                                  # tout le domaine + connecteurs + API (246 tests)
+npm run test:core                         # domaine pur
+npm run test:api                          # API + intégration
 node --test apps/api/test/api.test.ts     # un fichier précis
+node --test apps/web/test/*.test.ts       # aides d'affichage du front (64 tests)
+npm run test:e2e                          # parcours complets Playwright (14 tests)
 ```
 
-Les connecteurs sont **entièrement mockables** : aucun test n'a besoin de vos identifiants
+Les connecteurs sont **entièrement mockables** : aucun test n'essaie de vos identifiants
 ni d'un accès réseau.
+
+#### Tests de bout en bout (Playwright)
+
+```bash
+npx playwright install chromium           # une seule fois
+npm run test:e2e
+```
+
+Le harnais démarre **seul** l'API et sert le front construit, sur un port libre et avec une base
+SQLite temporaire détruite en fin d'exécution : rien n'est écrit dans votre base réelle. Les
+connecteurs sont des doublures déterministes (`SUIVIINVEST_E2E_CONNECTORS=1`), refusées en
+production. Le front est reconstruit automatiquement s'il est absent **ou périmé** : les parcours
+testés sont donc toujours ceux du dépôt.
+
+#### Limites connues de l'outillage (à traiter dans une mission dédiée)
+
+- `npm run lint` ne peut pas fonctionner : le dépôt n'a pas de fichier de configuration ESLint
+  (ESLint 9 exige un `eslint.config.js`). `npm run check` échoue donc sur cette étape.
+- `npm run format:check` signale ~170 fichiers : le style du code (types union éclatés ligne à
+  ligne, listes alignées) diffère volontairement de la sortie Prettier par défaut, et le dépôt
+  n'a jamais été passé au formateur. Un `.prettierrc.json` fixe désormais la largeur (120),
+  les guillemets simples et les virgules finales ; une passe complète reste à décider avec l'auteur.
+
+Ces deux points sont **antérieurs** à la mission 2 et n'affectent ni le comportement de
+l'application ni la suite de tests.
 
 ---
 

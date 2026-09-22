@@ -1,0 +1,14 @@
+import { chromium } from '@playwright/test';
+const base = 'http://127.0.0.1:41999';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+const errors = [];
+page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
+const resp = await page.goto(base + '/', { waitUntil: 'load' });
+console.log('STATUS', resp.status());
+await page.waitForTimeout(3000);
+console.log('HTML_LEN', (await page.content()).length);
+console.log('SNIPPET', (await page.content()).slice(0, 800).replace(/\n/g, ' '));
+console.log('ERRORS', JSON.stringify(errors).slice(0, 1500));
+await browser.close();

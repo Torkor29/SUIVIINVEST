@@ -28,3 +28,11 @@ coverage/
 logs/
 .DS_Store
 tmp/
+
+# Python (sidecars DEGIRO / Trade Republic)
+__pycache__/
+*.pyc
+
+# Artefacts des tests de bout en bout (rapports, état de session Playwright)
+e2e/.artifacts/
+e2e/.auth/

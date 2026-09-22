@@ -29,6 +29,7 @@ import {
   settingsDto,
   syncRuns,
 } from './reporting.ts';
+import { MOCK_WALLETS, mockSyncAllResponse, mockSyncOutcome, mockWalletResync } from './sync.ts';
 import type { PeriodKey } from '@suiviinvest/api-contract';
 
 export const MOCK_CSRF_TOKEN = 'mock-csrf-token';
@@ -122,13 +123,18 @@ export function mockRequest(url: string, method: string, body: unknown): unknown
   }
   if (/^\/api\/connections\/[^/]+\/(test|sync)$/.test(path)) {
     const id = decodeURIComponent(path.split('/')[3] ?? '');
-    const runs = syncRuns(id);
     state.lastSyncAt = new Date().toISOString();
-    return runs[0] ?? null;
+    return mockSyncOutcome(id);
   }
   if (path === '/api/connections/sync-all') {
     state.lastSyncAt = new Date().toISOString();
-    return syncRuns(null);
+    return mockSyncAllResponse();
+  }
+  if (path === '/api/wallets') return [...MOCK_WALLETS];
+  if (/^\/api\/wallets\/[^/]+\/resync$/.test(path)) {
+    const accountId = decodeURIComponent(path.split('/')[3] ?? '');
+    state.lastSyncAt = new Date().toISOString();
+    return mockWalletResync(accountId);
   }
   if (/^\/api\/connections\/[^/]+$/.test(path)) {
     return method === 'DELETE' ? { ok: true } : { ok: true };

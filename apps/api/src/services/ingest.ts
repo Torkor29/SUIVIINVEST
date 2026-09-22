@@ -214,6 +214,11 @@ export class IngestService {
             currency: position.currency,
             source: 'CONNECTOR',
             note: `Position ${position.rawSourceType}`,
+            // La quantité et le prix unitaire sont conservés : sans eux, une
+            // position ne peut pas être affichée (et un transfert natif, sans
+            // adresse de contrat, ne peut pas être reconstitué depuis l'historique).
+            quantity: position.quantity,
+            unitPrice: position.unitPrice,
           });
           valuationsWritten++;
         }

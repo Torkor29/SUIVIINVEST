@@ -1,8 +1,8 @@
 import { computePositions, round, sum, WEALTH_CLASSES } from '@suiviinvest/core';
-import type { AllocationSlice, CryptoResponse, CryptoWalletDto, PeriodKey } from '@suiviinvest/api-contract';
+import type { AllocationSlice, CryptoAssetDto, CryptoResponse, CryptoWalletDto, PeriodKey } from '@suiviinvest/api-contract';
 import type { Db } from '../db/database.ts';
 import { AccountRepository, InstrumentRepository } from '../repositories/accounts.ts';
-import { ActivityRepository, toDomainActivity } from '../repositories/activities.ts';
+import { ActivityRepository, toDomainActivity, ValuationRepository } from '../repositories/activities.ts';
 import { MarketRepository } from '../repositories/market.ts';
 
 /**
@@ -10,8 +10,15 @@ import { MarketRepository } from '../repositories/market.ts';
  *
  * Aucune clé privée, aucune seed, aucune signature : un wallet est identifié par
  * son adresse publique, et le suivi fonctionne sans connexion permanente à
- * MetaMask. Toutes les données viennent des activités déjà ingérées (transactions
- * on-chain normalisées) et des cours du module market data.
+ * MetaMask.
+ *
+ * Source des positions, dans cet ordre :
+ *  1. la DERNIÈRE POSITION COMMUNIQUÉE PAR LE CONNECTEUR (table `valuations`) —
+ *     c'est la seule source fiable pour un portefeuille observé par adresse :
+ *     un transfert natif (ETH, POL…) n'a pas d'adresse de contrat, donc rejouer
+ *     l'historique ne permet pas de le rattacher à un jeton ;
+ *  2. à défaut, les positions reconstituées depuis les activités ingérées, avec
+ *     les cours du module market data.
  *
  * ⚠️ Le suivi par adresse seule ne voit que ce qui a été synchronisé : si un
  * indexer n'est pas configuré, le wallet apparaît avec un historique partiel —
@@ -21,12 +28,14 @@ export class CryptoService {
   readonly #accounts: AccountRepository;
   readonly #instruments: InstrumentRepository;
   readonly #activities: ActivityRepository;
+  readonly #valuations: ValuationRepository;
   readonly #market: MarketRepository;
 
   constructor(db: Db, options: { baseCurrency: string }) {
     this.#accounts = new AccountRepository(db);
     this.#instruments = new InstrumentRepository(db);
     this.#activities = new ActivityRepository(db);
+    this.#valuations = new ValuationRepository(db);
     this.#market = new MarketRepository(db);
     void options.baseCurrency;
   }
@@ -38,6 +47,21 @@ export class CryptoService {
 
     for (const account of this.#accounts.list()) {
       if (account.type !== 'CRYPTO') continue;
+
+      const declared = this.#declaredPositions(account.id, latestQuotes, warnings);
+      if (declared !== null) {
+        wallets.push({
+          accountId: account.id,
+          name: account.name,
+          address: account.external_account_id ?? '—',
+          chains: [...new Set(declared.assets.map((asset) => asset.chain))],
+          valueEur: round(sum(declared.assets.map((asset) => asset.valueEur))),
+          assets: declared.assets,
+          lastSyncedAt: declared.lastSyncedAt,
+        });
+        continue;
+      }
+
       const rows = this.#activities.listForAccount(account.id);
       if (rows.length === 0) {
         wallets.push({
@@ -78,11 +102,9 @@ export class CryptoService {
             currency: account.currency,
             valueEur: round(position.marketValue),
             isNative: instrument?.contract_address === null,
-            _chains: instrument?.chain ?? 'unknown',
           };
         });
 
-      const chains = [...new Set(assets.map((asset) => asset.chain))];
       for (const asset of assets) {
         if (asset.price === null) {
           warnings.push(
@@ -95,9 +117,9 @@ export class CryptoService {
         accountId: account.id,
         name: account.name,
         address: account.external_account_id ?? '—',
-        chains,
+        chains: [...new Set(assets.map((asset) => asset.chain))],
         valueEur: round(sum(assets.map((asset) => asset.valueEur))),
-        assets: assets.map(({ _chains, ...asset }) => asset),
+        assets,
         lastSyncedAt: rows.reduce<string | null>(
           (latest, row) => (!latest || row.last_synced_at > latest ? row.last_synced_at : latest),
           null,
@@ -122,6 +144,56 @@ export class CryptoService {
       byChain: this.#slices([...byChainMap.entries()].map(([key, value]) => ({ key, value }))),
       warnings,
     };
+  }
+
+  /**
+   * Positions déclarées par la source (dernière synchronisation).
+   *
+   * `null` signifie « aucune position connue » : l'appelant retombe alors sur la
+   * reconstitution depuis les activités. Une position sans quantité exploitable
+   * est ignorée avec un avertissement plutôt que comptée à zéro.
+   */
+  #declaredPositions(
+    accountId: string,
+    latestQuotes: Map<string, { close: number }>,
+    warnings: string[],
+  ): { assets: CryptoAssetDto[]; lastSyncedAt: string | null } | null {
+    const positions = this.#valuations.latestPositionsForAccount(accountId);
+    if (positions.length === 0) return null;
+
+    const assets: CryptoAssetDto[] = [];
+    let lastSyncedAt: string | null = null;
+    for (const position of positions) {
+      if (position.date > (lastSyncedAt ?? '')) lastSyncedAt = position.date;
+      if (position.quantity === null || position.quantity <= 0) {
+        warnings.push(
+          `Position ${position.symbol ?? position.name} ignorée : quantité inconnue (resynchronisez ce wallet).`,
+        );
+        continue;
+      }
+      const quantity = position.quantity;
+      const quote = latestQuotes.get(position.instrumentId);
+      const price: number | null = quote ? quote.close : position.unitPrice;
+      assets.push({
+        chain: position.chain ?? 'unknown',
+        symbol: position.symbol ?? '—',
+        name: position.name,
+        contractAddress: position.contractAddress,
+        quantity,
+        price,
+        currency: position.currency,
+        // Sans cours ni prix communiqué, la valeur déclarée est conservée telle
+        // quelle plutôt que remise à zéro.
+        valueEur: price === null ? round(position.value) : round(quantity * price),
+        isNative: position.contractAddress === null,
+      });
+      if (price === null) {
+        warnings.push(
+          `Prix indisponible pour ${position.symbol ?? position.name} : valorisé à la dernière valeur connue.`,
+        );
+      }
+    }
+    return { assets, lastSyncedAt };
   }
 
   #slices(items: readonly { key: string; value: number }[]): AllocationSlice[] {

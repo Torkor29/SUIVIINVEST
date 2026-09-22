@@ -642,3 +642,237 @@
     grid-template-columns: minmax(100px, 1fr) auto;
   }
 }
+
+/* ------------------------------------------------- connexions et wallets */
+
+.source-grid {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+}
+
+.source-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.conn-facts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 4px 0 14px;
+}
+
+.conn-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.conn-facts dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conn-connect-form,
+.conn-import {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.tech-details {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.tech-details summary {
+  cursor: pointer;
+  color: var(--text-soft);
+}
+
+.tech-details pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.feedback-pending {
+  color: var(--warn);
+}
+
+.warnings-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+.sync-outcome {
+  margin: 6px 0;
+}
+
+.sync-all-summary {
+  margin-bottom: var(--gap);
+}
+
+.sync-all-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.sync-all-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(120px, 180px) auto minmax(0, 1fr);
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sync-all-name {
+  font-weight: 620;
+}
+
+.wallet-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wallet-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.wallet-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.form-grid .card-actions-row {
+  grid-column: 1 / -1;
+}
+
+.property-form,
+.cashflow-form {
+  margin-bottom: var(--gap);
+}
+
+@media (max-width: 640px) {
+  .source-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sync-all-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------ refonte Connexions (Mission 2) */
+
+.conn-grid {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+}
+
+.conn-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.conn-form {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.conn-form .field {
+  margin: 0;
+}
+
+.feedback-warn {
+  color: var(--warn);
+}
+
+.warnings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+.sync-all-source {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wallet-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.chain-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chain-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.chain-row span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .conn-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

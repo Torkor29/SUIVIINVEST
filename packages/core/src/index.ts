@@ -1,5 +1,6 @@
 export * from './types.ts';
 export * from './money.ts';
+export * from './text.ts';
 export * from './dedup.ts';
 export * from './positions.ts';
 export * from './performance.ts';

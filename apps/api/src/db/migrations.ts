@@ -345,9 +345,27 @@ CREATE TABLE chain_sync_state (
 );
 `;
 
+/**
+ * Mission 2 (suite) — quantités des positions collectées.
+ *
+ * `valuations` ne stockait qu'une valeur totale : la quantité et le prix
+ * unitaire communiqués par le connecteur étaient perdus, ce qui empêchait
+ * d'afficher un portefeuille crypto (jeton, quantité, prix) et obligeait à
+ * rejouer les transactions pour deviner les positions — impossible pour un
+ * transfert natif, qui n'a pas d'adresse de contrat.
+ *
+ * Les deux colonnes sont NULLABLES : les valorisations manuelles et les soldes
+ * de trésorerie gardent exactement leur comportement d'avant.
+ */
+const POSITION_QUANTITIES_V5 = `
+ALTER TABLE valuations ADD COLUMN quantity REAL;
+ALTER TABLE valuations ADD COLUMN unit_price REAL;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
   { version: 3, name: 'indexes', statements: [INDEXES_V3] },
   { version: 4, name: 'mission2_sync_state_and_snapshots', statements: [MISSION2_V4] },
+  { version: 5, name: 'position_quantities', statements: [POSITION_QUANTITIES_V5] },
 ];

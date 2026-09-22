@@ -257,8 +257,17 @@ export class ProcessSidecarTransport implements SidecarTransport {
         'Voir docs/connectors/sidecars.md.'
       );
     }
+    const command = this.#endpoint.command?.trim() ?? '';
+    if (command === '') {
+      return (
+        `Sidecar « ${this.name} » non configuré : aucun exécutable ni URL n’est défini. ` +
+        `Définissez SUIVIINVEST_SIDECAR_${envSlug(this.name)}_COMMAND ou ` +
+        `SUIVIINVEST_SIDECAR_${envSlug(this.name)}_URL, après avoir installé les dépendances ` +
+        'Python (voir sidecar/README.md).'
+      );
+    }
     return (
-      `Sidecar « ${this.name} » non configuré : l’exécutable « ${this.#endpoint.command} » est introuvable. ` +
+      `Sidecar « ${this.name} » non configuré : l’exécutable « ${command} » est introuvable. ` +
       `Définissez SUIVIINVEST_SIDECAR_${envSlug(this.name)}_COMMAND (ou _URL) et installez les ` +
       'dépendances Python (voir sidecar/README.md).'
     );

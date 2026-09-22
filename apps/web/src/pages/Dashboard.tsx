@@ -13,6 +13,7 @@ import { AllocationLegend, ReadOnlyNote, WarningsList } from '../components/ui/A
 import { LineAreaChart } from '../components/charts/LineAreaChart.tsx';
 import { DonutChart } from '../components/charts/DonutChart.tsx';
 import { SummaryStrip } from '../components/dashboard/SummaryStrip.tsx';
+import { describeHistorySource } from '../lib/history.ts';
 
 /** Tableau de bord : patrimoine net, variations, historique et répartitions. */
 export function DashboardPage() {
@@ -21,6 +22,7 @@ export function DashboardPage() {
     (signal) => request<NetWorthResponse>('/api/networth', { query: { period }, signal }),
     [period],
   );
+  const provenance = describeHistorySource(state.data?.historySource, state.data?.recordedSince);
 
   return (
     <>
@@ -51,6 +53,9 @@ export function DashboardPage() {
               subtitle={`Période affichée : ${PERIOD_LABELS[period]}`}
               actions={<PeriodSelector value={period} onChange={setPeriod} />}
             >
+              <p className="muted small" data-testid="history-provenance">
+                <Badge tone={provenance.tone}>{provenance.label}</Badge> {provenance.detail}
+              </p>
               <LineAreaChart points={data.series} />
               <WarningsList warnings={data.warnings} />
             </Card>

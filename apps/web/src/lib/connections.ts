@@ -7,6 +7,7 @@
  *  - un message d'erreur technique n'est jamais montré tel quel : on produit une
  *    phrase compréhensible et, à côté, un détail repliable.
  */
+import { plural } from '@suiviinvest/core/text';
 import type {
   ConnectionDto,
   SyncAllResponse,
@@ -106,6 +107,13 @@ export function isConnected(connection: ConnectionDto | null | undefined): boole
 
 /* -------------------------------------------------------------------- dates */
 
+/** ISO -> Date (UTC), `null` si la valeur est inexploitable. */
+function parseDate(iso: string | null | undefined): Date | null {
+  if (iso === null || iso === undefined || iso === '') return null;
+  const date = new Date(iso.length <= 10 ? `${iso}T00:00:00Z` : iso);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /**
  * « il y a X » à partir d'une date ISO. Le « maintenant » est injectable pour
  * que les tests soient déterministes.
@@ -188,10 +196,6 @@ export type SyncOutcomeLike = Pick<
   SyncOutcomeDto,
   'created' | 'updated' | 'skipped' | 'errors' | 'durationMs' | 'status'
 >;
-
-function plural(count: number, singular: string, pluralForm: string): string {
-  return `${count} ${count > 1 ? pluralForm : singular}`;
-}
 
 /**
  * Résumé lisible d'un retour de synchronisation :
@@ -331,6 +335,39 @@ export function syncAllHeadline(summary: SyncAllSummaryView): string {
 }
 
 /* ------------------------------------------------------------------ wallets */
+
+/** Comptes d'une source : nombre total et valeur récupérée en euros. */
+export interface SourceAccountSummary {
+  readonly count: number;
+  readonly valueEur: number;
+  /** Comptes dont la valeur n'est pas libellée en euros (jamais additionnée en silence). */
+  readonly foreignCount: number;
+}
+
+export interface AccountLike {
+  readonly providerId: string;
+  readonly value: number;
+  readonly valueCurrency: string;
+}
+
+/**
+ * Agrège les comptes d'un fournisseur.
+ *
+ * Seules les valeurs libellées en euros sont additionnées : une devise
+ * différente est comptée à part, jamais convertie au jugé côté client.
+ */
+export function summarizeAccounts(accounts: readonly AccountLike[], providerId: string): SourceAccountSummary {
+  let count = 0;
+  let valueEur = 0;
+  let foreignCount = 0;
+  for (const account of accounts) {
+    if (account.providerId !== providerId) continue;
+    count += 1;
+    if (account.valueCurrency.toUpperCase() === 'EUR') valueEur += account.value;
+    else foreignCount += 1;
+  }
+  return { count, valueEur, foreignCount };
+}
 
 /** Nombre de jetons d'un wallet EVM. */
 export function walletTokenCount(wallet: WalletStatusDto): number {

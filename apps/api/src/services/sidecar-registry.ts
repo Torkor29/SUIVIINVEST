@@ -153,9 +153,9 @@ export function createSidecarTransports(config: SidecarTransportsConfig = {}): S
     const logger = config.logger;
     const transport = createSidecarTransport(
       provider,
-      // Endpoint inerte mais explicite quand rien n'est configuré : le message
-      // d'erreur reste actionnable (voir ProcessSidecarTransport#unavailableMessage).
-      endpoint ?? { command: `<sidecar ${provider} non configuré>` },
+      // Endpoint inerte quand rien n'est configuré : le message d'erreur reste
+      // actionnable (voir ProcessSidecarTransport#unavailableMessage).
+      endpoint ?? { command: '' },
       { ...(config.timeoutMs ? { timeoutMs: config.timeoutMs } : {}), ...(logger ? { logger } : {}) },
     );
     return transport;

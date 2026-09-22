@@ -1,4 +1,4 @@
-import { DedupIndex, externalDedupKey, fingerprint } from '@suiviinvest/core';
+import { DedupIndex, externalDedupKey, fingerprint, plural } from '@suiviinvest/core';
 import type {
   ImportAnalyzeRequest,
   ImportAnalyzeResponse,
@@ -261,7 +261,8 @@ export class ImportService {
       errors: report.errors + parsed.errors.length,
       message: request.dryRun
         ? 'Simulation terminée : aucune écriture effectuée.'
-        : `${report.created} ligne(s) importée(s), ${report.skipped} ignorée(s) (déjà présentes).`,
+        : `${plural(report.created, 'ligne importée', 'lignes importées')}, ` +
+          `${plural(report.skipped, 'ignorée', 'ignorées')} (déjà présentes).`,
     };
   }
 

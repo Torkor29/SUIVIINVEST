@@ -13,6 +13,7 @@ export const SETTINGS: SettingsDto = {
     retentionDays: 30,
   },
   scheduler: { enabled: true, cron: '*/30 * * * *' },
+  snapshotCron: '15 0 * * *',
   security: {
     sessionTtlMinutes: 720,
     argon2Params: 'argon2id, m=64MiB, t=3, p=1',

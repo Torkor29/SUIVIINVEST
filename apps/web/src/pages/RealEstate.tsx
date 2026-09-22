@@ -10,6 +10,7 @@ import { DataTable, type Column } from '../components/ui/DataTable.tsx';
 import { ReadOnlyNote } from '../components/ui/AllocationLegend.tsx';
 import { BarChart } from '../components/charts/BarChart.tsx';
 import { PropertyCard } from '../components/realestate/PropertyCard.tsx';
+import { PropertyForms } from '../components/realestate/PropertyForms.tsx';
 import type { PropertyCashFlowDto } from '@suiviinvest/api-contract';
 
 /** Immobilier : biens, crédits, rendements, flux de trésorerie et amortissement. */
@@ -62,8 +63,6 @@ export function RealEstatePage() {
         error={state.error}
         data={state.data}
         onRetry={state.reload}
-        empty={(data) => data.properties.length === 0}
-        emptyState={<EmptyState title="Aucun bien" hint="Les biens déclarés apparaîtront ici avec leur crédit et leurs loyers." />}
         skeleton={
           <>
             <SkeletonTiles count={4} />
@@ -73,6 +72,13 @@ export function RealEstatePage() {
       >
         {(data) => (
           <>
+            {data.properties.length === 0 && (
+              <EmptyState
+                title="Aucun bien"
+                hint="Déclarez un bien ci-dessous : il apparaîtra ici avec son crédit et ses loyers."
+              />
+            )}
+
             <Grid>
               <StatTile label="Valeur des biens" value={formatEur(data.totals.currentValue, 0)} hint={`${data.properties.length} bien(s)`} />
               <StatTile label="Capital restant dû" value={formatEur(data.totals.loanBalance, 0)} hint={`Intérêts payés ${formatEur(data.totals.interestPaid, 0)}`} />
@@ -121,6 +127,8 @@ export function RealEstatePage() {
                 <KeyValue label="Charges annuelles" value={formatEur(data.totals.annualExpenses, 0)} />
               </div>
             </Card>
+
+            <PropertyForms properties={data.properties} onChanged={state.reload} />
 
             <ReadOnlyNote text="Les biens et crédits sont saisis manuellement : aucune opération bancaire n’est déclenchée." />
           </>
