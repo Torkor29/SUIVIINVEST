@@ -25,7 +25,15 @@ test('parcours complet : configuration, session, écriture protégée par CSRF',
   assert.equal((beforeSetup.json() as { error: { code: string } }).error.code, 'UNAUTHENTICATED');
 
   const sessionInfo = await ctx.app.app.inject({ method: 'GET', url: '/api/auth/session' });
-  assert.deepEqual(sessionInfo.json(), { authenticated: false, csrfToken: null, needsSetup: true });
+  assert.deepEqual(sessionInfo.json(), {
+    authenticated: false,
+    csrfToken: null,
+    needsSetup: true,
+    username: null,
+    role: null,
+    accountsCount: 0,
+    usernameRequired: false,
+  });
 
   // 3. configuration initiale : mot de passe trop faible refusé
   const weak = await ctx.app.app.inject({

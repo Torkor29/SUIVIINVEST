@@ -85,20 +85,33 @@ function bodyField<T>(body: unknown, field: string, fallback: T): T {
   return (value === undefined || value === null ? fallback : (value as T));
 }
 
+/** Réponse de session simulée, complète (compte, rôle, nombre de comptes). */
+function mockSession(authenticated: boolean): SessionResponse {
+  return {
+    authenticated,
+    csrfToken: authenticated ? MOCK_CSRF_TOKEN : null,
+    needsSetup: false,
+    username: 'proprietaire',
+    role: 'OWNER',
+    accountsCount: 1,
+    usernameRequired: true,
+  };
+}
+
 /** Réponse simulée pour une requête donnée (aucune écriture réelle). */
 export function mockRequest(url: string, method: string, body: unknown): unknown {
   const parsed = new URL(url, 'http://maquette.local');
   const path = parsed.pathname;
   const params = parsed.searchParams;
 
-  if (path === '/api/auth/session') return { authenticated: true, csrfToken: MOCK_CSRF_TOKEN, needsSetup: false } satisfies SessionResponse;
+  if (path === '/api/auth/session') return mockSession(true) satisfies SessionResponse;
   if (path === '/api/auth/login' || path === '/api/auth/setup') {
     if (method === 'POST' && bodyField<string>(body, 'password', '') !== MOCK_PASSWORD && bodyField<string>(body, 'password', '') !== '') {
-      return { authenticated: true, csrfToken: MOCK_CSRF_TOKEN, needsSetup: false } satisfies SessionResponse;
+      return mockSession(true) satisfies SessionResponse;
     }
-    return { authenticated: true, csrfToken: MOCK_CSRF_TOKEN, needsSetup: false } satisfies SessionResponse;
+    return mockSession(true) satisfies SessionResponse;
   }
-  if (path === '/api/auth/logout') return { authenticated: true, csrfToken: MOCK_CSRF_TOKEN, needsSetup: false } satisfies SessionResponse;
+  if (path === '/api/auth/logout') return mockSession(false) satisfies SessionResponse;
 
   if (path === '/api/networth') return netWorthResponse(periodFrom(params));
   if (path === '/api/accounts') return accountsResponse();

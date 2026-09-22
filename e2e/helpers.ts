@@ -7,17 +7,37 @@ export const E2E_PASSWORD = 'mot-de-passe-e2e-2026';
 export const E2E_WALLET_ADDRESS = '0xe2e0000000000000000000000000000000000001';
 
 /**
- * Crée le mot de passe via l'INTERFACE (parcours réel du premier lancement).
+ * Crée le premier compte via l'INTERFACE (parcours réel du premier lancement).
  * À n'appeler que sur une base neuve.
+ *
+ * Depuis la mission 3, la création affiche UNE fois le code de récupération et
+ * exige une confirmation explicite : sans cela, l'utilisateur ne pourrait plus
+ * jamais reprendre la main sur son compte. Le parcours doit donc passer par cet
+ * écran, comme un vrai utilisateur.
  */
 export async function createPasswordThroughUi(page: Page, password = E2E_PASSWORD): Promise<void> {
   await page.goto('/');
   const field = page.locator('input[type="password"]');
   await expect(field).toBeVisible();
   await field.fill(password);
-  await page.getByRole('button', { name: /Créer le mot de passe/i }).click();
+  await page.getByRole('button', { name: /Créer le compte/i }).click();
+  // Écran « Notez ce code de récupération » : le code est affiché une seule fois.
+  await acknowledgeRecoveryCode(page);
   // Le tableau de bord n'apparaît qu'une fois la session ouverte.
   await expect(page.getByRole('link', { name: 'Tableau de bord' })).toBeVisible();
+}
+
+/**
+ * Passe l'écran du code de récupération et retourne le code affiché, pour que
+ * le test puisse s'en servir plus tard (parcours « mot de passe oublié »).
+ */
+export async function acknowledgeRecoveryCode(page: Page): Promise<string> {
+  const notice = page.getByTestId('recovery-code-issued');
+  await expect(notice).toBeVisible();
+  const code = (await notice.innerText()).trim();
+  await page.getByTestId('recovery-ack').check();
+  await page.getByTestId('recovery-done').click();
+  return code;
 }
 
 /** Navigation par la barre latérale, comme un utilisateur. */

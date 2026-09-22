@@ -181,6 +181,9 @@ export function errorMessage(error: unknown): string {
     switch (error.code) {
       case 'UNAUTHENTICATED':
         return 'Session expirée : reconnectez-vous.';
+      case 'INVALID_CREDENTIALS':
+        // Le serveur fournit déjà un message volontairement générique.
+        return error.message;
       case 'FORBIDDEN':
         return 'Action non autorisée.';
       case 'INVALID_REQUEST':

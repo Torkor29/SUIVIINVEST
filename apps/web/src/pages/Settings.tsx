@@ -12,6 +12,7 @@ import { AsyncView } from '../components/ui/AsyncView.tsx';
 import { SkeletonLines } from '../components/ui/Skeleton.tsx';
 import { StatTile, KeyValue, Badge } from '../components/ui/Stat.tsx';
 import { ReadOnlyNote } from '../components/ui/AllocationLegend.tsx';
+import { AccountsPanel } from '../components/security/AccountsPanel.tsx';
 
 /** Paramètres : thème, données de marché, sauvegardes, sécurité et santé du serveur. */
 export function SettingsPage() {
@@ -131,6 +132,8 @@ export function SettingsPage() {
                 <p className="muted small">Les secrets des connecteurs ne sortent jamais du serveur ; le frontend ne les affiche pas.</p>
               </Card>
             </Grid>
+
+            <AccountsPanel />
 
             <Card title="Santé du serveur" subtitle="Point de contrôle /health.">
               {health.data === null ? (

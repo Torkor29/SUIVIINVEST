@@ -362,10 +362,37 @@ ALTER TABLE valuations ADD COLUMN quantity REAL;
 ALTER TABLE valuations ADD COLUMN unit_price REAL;
 `;
 
+/**
+ * Mission 3 — comptes multiples et récupération d'accès.
+ *
+ * Avant cette migration, l'application n'avait qu'UN compte sans identifiant :
+ * impossible d'en créer un second, et un mot de passe oublié était définitif
+ * (aucun chemin de récupération). Les colonnes ajoutées sont NULLABLES pour que
+ * les installations existantes continuent de fonctionner à l'identique : un
+ * compte sans `username` se connecte au mot de passe seul, comme avant.
+ *
+ * `recovery_hash` ne contient QUE l'empreinte SHA-256 du code de récupération,
+ * jamais le code lui-même : même avec la base sous les yeux, on ne peut pas
+ * reconstituer un accès.
+ */
+const ACCOUNTS_V6 = `
+ALTER TABLE users ADD COLUMN username TEXT;
+ALTER TABLE users ADD COLUMN display_name TEXT;
+ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'MEMBER';
+ALTER TABLE users ADD COLUMN recovery_hash TEXT;
+ALTER TABLE users ADD COLUMN created_by TEXT;
+ALTER TABLE users ADD COLUMN last_login_at TEXT;
+ALTER TABLE users ADD COLUMN password_changed_at TEXT;
+ALTER TABLE users ADD COLUMN disabled_at TEXT;
+
+CREATE UNIQUE INDEX idx_users_username ON users(LOWER(username)) WHERE username IS NOT NULL;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
   { version: 3, name: 'indexes', statements: [INDEXES_V3] },
   { version: 4, name: 'mission2_sync_state_and_snapshots', statements: [MISSION2_V4] },
   { version: 5, name: 'position_quantities', statements: [POSITION_QUANTITIES_V5] },
+  { version: 6, name: 'accounts_and_recovery', statements: [ACCOUNTS_V6] },
 ];

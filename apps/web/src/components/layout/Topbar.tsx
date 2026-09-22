@@ -23,9 +23,9 @@ export function Topbar({ onMenu, lastSyncAt, onLogout }: TopbarProps) {
       </div>
       <div className="topbar-actions">
         <ThemeToggle />
-        <button type="button" className="btn btn-ghost" onClick={onLogout}>
+        <button type="button" className="btn btn-ghost" onClick={onLogout} aria-label="Se déconnecter">
           <IconLock size={16} />
-          <span className="btn-label">Verrouiller</span>
+          <span className="btn-label">Se déconnecter</span>
         </button>
       </div>
     </header>

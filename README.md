@@ -260,6 +260,7 @@ Certificat : `sudo certbot --nginx -d patrimoine.example.com`.
 | Mesure | Mise en œuvre |
 | --- | --- |
 | Mot de passe application | Argon2id (m = 19 MiB, t = 2, p = 1) |
+| Code de récupération | 100 bits, alphabet sans caractères ambigus, stocké en SHA-256 uniquement |
 | Sessions | Jeton aléatoire 256 bits, stocké **haché** (SHA-256) en base |
 | Cookies | `HttpOnly`, `Secure` (prod), `SameSite=Lax`, expiration glissante |
 | CSRF | Jeton dédié obligatoire sur toute écriture (`x-csrf-token`) |
@@ -270,6 +271,21 @@ Certificat : `sudo certbot --nginx -d patrimoine.example.com`.
 | Journalisation | Aucun mot de passe, PIN, cookie, jeton ou clé privée ; valeurs sensibles masquées |
 | Erreurs | Normalisées, nettoyées : aucun détail interne ni secret dans une réponse |
 | Conteneur | Utilisateur non privilégié, `no-new-privileges`, toutes capacités retirées |
+
+### Aucun mot de passe n'est lisible dans la base
+
+C'est vérifié par un test automatique, pas seulement affirmé : `npm run test:api` compare le
+contenu réel du fichier SQLite (et de son journal WAL) aux mots de passe et codes utilisés pendant
+le test — aucun n'y apparaît. Ce qui est stocké :
+
+| Donnée | Ce qui est écrit en base | Peut-on remonter au secret ? |
+| --- | --- | --- |
+| Mot de passe | Empreinte **Argon2id** (`$argon2id$v=19$m=19456,t=2,p=1$…`) | Non |
+| Code de récupération | **SHA-256** hexadécimal | Non |
+| Jeton de session | **SHA-256** du jeton | Non |
+
+Conséquence assumée : **un mot de passe ne peut jamais être relu ni retrouvé**, seulement remplacé
+(voir la section suivante). Et une session ou un code volé dans la base ne peut pas être rejoué.
 
 **Interdits structurels.** Aucun champ de base ne peut contenir une seed phrase ou une clé
 privée ; l'API refuse explicitement une connexion qui en fournirait une. Aucune méthode
@@ -371,7 +387,7 @@ docker run --rm -v suiviinvest-backups:/backups node:24-bookworm-slim \
 
 ```bash
 npm install
-npm test          # 246 tests (domaine + connecteurs + API), aucun réseau, aucun identifiant
+npm test          # 255 tests (domaine + connecteurs + API), aucun réseau, aucun identifiant
 npm run typecheck # TypeScript strict, aucun `any`
 npm run dev:api   # API sur :9123 (rechargement automatique)
 npm run dev:web   # frontend Vite sur :5173
@@ -392,12 +408,12 @@ docs/                  Architecture, notes de conception, veille sur les connect
 ### Tests
 
 ```bash
-npm test                                  # tout le domaine + connecteurs + API (246 tests)
+npm test                                  # tout le domaine + connecteurs + API (255 tests)
 npm run test:core                         # domaine pur
-npm run test:api                          # API + intégration
+npm run test:api                          # API + intégration (comptes, récupération, CLI)
 node --test apps/api/test/api.test.ts     # un fichier précis
 node --test apps/web/test/*.test.ts       # aides d'affichage du front (64 tests)
-npm run test:e2e                          # parcours complets Playwright (14 tests)
+npm run test:e2e                          # parcours complets Playwright (19 tests)
 ```
 
 Les connecteurs sont **entièrement mockables** : aucun test n'essaie de vos identifiants
@@ -427,6 +443,56 @@ testés sont donc toujours ceux du dépôt.
 
 Ces deux points sont **antérieurs** à la mission 2 et n'affectent ni le comportement de
 l'application ni la suite de tests.
+
+---
+
+## Comptes et récupération d'accès
+
+### Se déconnecter
+
+Le bouton **« Se déconnecter »** de la barre supérieure ferme la session côté serveur (le jeton est
+supprimé, pas seulement le cookie) : le lien rejoué depuis un autre onglet ne fonctionne plus.
+
+### Créer un compte
+
+- **Premier compte** : à la première visite, l'application propose de créer le compte. Il devient
+  **propriétaire** de l'application.
+- **Comptes suivants** : Paramètres → **Comptes** → « Ajouter un compte ». Seul un propriétaire
+  connecté peut le faire — il n'existe aucune inscription publique : l'application est exposée sur
+  Internet, une page d'inscription ouverte donnerait accès à votre patrimoine à n'importe qui.
+
+> ⚠️ **Les données ne sont pas cloisonnées par utilisateur.** Un compte supplémentaire voit le
+> même patrimoine, les mêmes comptes et les mêmes connexions que vous. Créez-en un pour une
+> personne de confiance, pas pour « quelqu'un qui peut regarder ».
+
+Dès qu'un compte porte un identifiant, l'identifiant devient obligatoire à la connexion (sinon
+l'application ne saurait pas distinguer les comptes). Une installation d'origine — un seul compte
+sans identifiant — garde l'écran « mot de passe seul ».
+
+### Mot de passe oublié
+
+Trois chemins, du plus simple au dernier recours :
+
+1. **Code de récupération** (écran de connexion → « Mot de passe oublié ? »). Un code de la forme
+   `ABCD-EFGH-JKLM-NPQR-STUV` est remis **une seule fois** à la création du compte, puis à chaque
+   changement de mot de passe. Rangez-le dans votre gestionnaire de mots de passe : le serveur n'en
+   conserve qu'une empreinte, il est donc impossible de vous le réafficher. Il fonctionne sans
+   e-mail, sans téléphone et sans accès au serveur — et il tourne à chaque utilisation.
+2. **Depuis l'application** (Paramètres → **Mon mot de passe** → **Nouveau code**), si vous êtes
+   encore connecté.
+3. **Depuis le serveur**, si le mot de passe ET le code sont perdus :
+
+```bash
+docker compose exec suiviinvest node apps/api/src/cli/reset-password.ts --list
+docker compose exec suiviinvest node apps/api/src/cli/reset-password.ts --username proprietaire --generate
+```
+
+Le mot de passe généré et le nouveau code de récupération sont affichés **dans votre terminal** :
+notez-les immédiatement. Sans `--generate`, le CLI demande le mot de passe en saisie masquée (il
+n'apparaît ni à l'écran ni dans l'historique du shell).
+
+Tout changement de mot de passe — par l'un des trois chemins — **révoque toutes les sessions** du
+compte : un jeton volé ne survit pas à la reprise en main.
 
 ---
 

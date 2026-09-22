@@ -7,8 +7,8 @@ export interface AuthContextValue {
   readonly loading: boolean;
   readonly error: string | null;
   readonly refresh: () => void;
-  readonly login: (password: string) => Promise<void>;
-  readonly setup: (password: string) => Promise<void>;
+  readonly login: (password: string, username?: string | null) => Promise<void>;
+  readonly setup: (password: string, username?: string | null) => Promise<{ recoveryCode: string }>;
   readonly logout: () => Promise<void>;
 }
 
@@ -38,17 +38,35 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     void load();
   }, [load]);
 
-  const login = useCallback(async (password: string) => {
-    const result = await request<SessionResponse>('/api/auth/login', { method: 'POST', json: { password } });
+  const login = useCallback(async (password: string, username?: string | null) => {
+    const result = await request<SessionResponse>('/api/auth/login', {
+      method: 'POST',
+      json: { password, ...(username ? { username } : {}) },
+    });
     if (result.csrfToken !== null) setCsrfToken(result.csrfToken);
     setSession(result);
   }, []);
 
-  const setup = useCallback(async (password: string) => {
-    const result = await request<SessionResponse>('/api/auth/setup', { method: 'POST', json: { password } });
-    if (result.csrfToken !== null) setCsrfToken(result.csrfToken);
-    setSession(result);
-  }, []);
+  /**
+   * Création du premier compte.
+   *
+   * La session n'est PAS ouverte ici, volontairement : le code de récupération
+   * n'est renvoyé qu'à cet instant et l'écran qui l'affiche doit rester visible.
+   * C'est `refresh()` (au clic sur « Continuer ») qui ouvre la session — sans
+   * quoi l'application basculerait sur le tableau de bord et le code serait
+   * définitivement perdu.
+   */
+  const setup = useCallback(
+    async (password: string, username?: string | null): Promise<{ recoveryCode: string }> => {
+      const result = await request<SessionResponse & { recoveryCode: string }>('/api/auth/setup', {
+        method: 'POST',
+        json: { password, ...(username ? { username } : {}) },
+      });
+      if (result.csrfToken !== null) setCsrfToken(result.csrfToken);
+      return { recoveryCode: result.recoveryCode };
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     try {

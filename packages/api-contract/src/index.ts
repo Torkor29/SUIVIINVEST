@@ -9,6 +9,13 @@
 
 export type ApiErrorCode =
   | 'UNAUTHENTICATED'
+  /**
+   * Identifiants refusés (connexion, code de récupération, mot de passe actuel).
+   * Distinct de `UNAUTHENTICATED` — qui signifie « session absente ou expirée » —
+   * pour que l'interface ne parle pas de session expirée à quelqu'un qui s'est
+   * simplement trompé de mot de passe.
+   */
+  | 'INVALID_CREDENTIALS'
   | 'FORBIDDEN'
   | 'INVALID_REQUEST'
   | 'NOT_FOUND'
@@ -27,15 +34,100 @@ export interface ApiError {
 
 /* -------------------------------------------------------------------- auth */
 
+export type AccountRole = 'OWNER' | 'MEMBER';
+
 export interface SessionResponse {
   readonly authenticated: boolean;
   /** Jeton CSRF à renvoyer dans l'en-tête `x-csrf-token` sur les écritures. */
   readonly csrfToken: string | null;
   readonly needsSetup: boolean;
+  /** Identifiant du compte connecté (`null` = compte historique sans identifiant). */
+  readonly username: string | null;
+  readonly role: AccountRole | null;
+  /** Nombre de comptes existants : 0 déclenche la création du premier compte. */
+  readonly accountsCount: number;
+  /**
+   * true = l'identifiant est demandé à la connexion. C'est le cas dès qu'un
+   * compte porte un identifiant ; une installation d'origine (un seul compte
+   * sans identifiant) garde l'écran « mot de passe seul ».
+   */
+  readonly usernameRequired: boolean;
 }
 
 export interface LoginRequest {
   readonly password: string;
+  readonly username?: string | null;
+}
+
+export interface SetupRequest {
+  readonly password: string;
+  readonly username?: string | null;
+  readonly displayName?: string | null;
+}
+
+/**
+ * Réponse de création de compte : le code de récupération n'est affiché qu'UNE
+ * fois. Seule son empreinte est conservée côté serveur — il est donc impossible
+ * de le relire ensuite, y compris pour l'application elle-même.
+ */
+export interface AccountCreatedResponse {
+  readonly account: AccountSummaryDto;
+  readonly recoveryCode: string;
+}
+
+export interface AccountSummaryDto {
+  readonly id: string;
+  readonly username: string | null;
+  readonly displayName: string | null;
+  readonly role: AccountRole;
+  readonly disabled: boolean;
+  readonly createdAt: string;
+  readonly lastLoginAt: string | null;
+  readonly passwordChangedAt: string | null;
+  /** true = un code de récupération existe pour ce compte (jamais relisible). */
+  readonly hasRecoveryCode: boolean;
+}
+
+export interface AccountListResponse {
+  readonly accounts: readonly AccountSummaryDto[];
+}
+
+export interface CreateAccountRequest {
+  readonly username: string;
+  readonly password: string;
+  readonly displayName?: string | null;
+  readonly role?: AccountRole;
+  /**
+   * Identifiant à donner au compte du créateur s'il n'en a pas encore : sans
+   * cela, il ne pourrait plus se connecter dès qu'un second compte existe.
+   */
+  readonly ownerUsername?: string | null;
+}
+
+export interface ChangePasswordRequest {
+  readonly currentPassword: string;
+  readonly newPassword: string;
+}
+
+export interface RecoveryRequest {
+  readonly recoveryCode: string;
+  readonly newPassword: string;
+  readonly username?: string | null;
+}
+
+export interface RecoveryResponse {
+  readonly username: string | null;
+  /** Nouveau code, à conserver : l'ancien ne fonctionne plus. */
+  readonly recoveryCode: string;
+}
+
+/**
+ * Après un changement de mot de passe, la session courante est révoquée : le
+ * client doit revenir à l'écran de connexion. Le nouveau code de récupération
+ * est renvoyé UNE fois (l'ancien ne fonctionne plus).
+ */
+export interface ChangePasswordResponse {
+  readonly recoveryCode: string;
 }
 
 /* --------------------------------------------------------------- patrimoine */
