@@ -67,6 +67,8 @@ READ_ONLY_METHODS = frozenset(
         "stock_details",
         "order_overview",
         "settings",
+        "ticker",
+        "timeline_transactions",
     }
 )
 
@@ -321,99 +323,241 @@ def _run(coro: Any) -> Any:
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-# ------------------------------------------------------------------ normalisation
+# ------------------------------------------------------------ lecture websocket
+#
+# Dans ``pytr``, ``await tr.compact_portfolio()`` (comme ``cash()``,
+# ``timeline_transactions()``…) ne renvoie PAS les données : il ouvre un
+# abonnement et renvoie son numéro. Les réponses arrivent ensuite par
+# ``tr.recv()``. Les fonctions ci-dessous attendent ces réponses.
+
+#: Délai d'attente d'une réponse Trade Republic (secondes).
+RECV_TIMEOUT = 20.0
 
 
-def _normalize_positions(response: Any) -> list[dict]:
+async def _fetch_one(tr: Any, subscribe: Any, timeout: float = RECV_TIMEOUT) -> Any:
+    """S'abonne, attend LA réponse de cet abonnement, puis se désabonne."""
+    return await tr._receive_one(subscribe, timeout=timeout)
+
+
+async def _fetch_many(tr: Any, subscribes: dict, timeout: float = RECV_TIMEOUT) -> dict:
+    """Plusieurs abonnements en parallèle : {clé: réponse} (clés sans réponse absentes)."""
+    pending: dict = {}
+    for key, subscribe in subscribes.items():
+        pending[await subscribe] = key
+    results: dict = {}
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while pending:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        try:
+            sub_id, _subscription, response = await asyncio.wait_for(tr.recv(), remaining)
+        except asyncio.TimeoutError:
+            break
+        except Exception:  # noqa: BLE001 - réponse en erreur pour un seul élément
+            continue
+        key = pending.pop(sub_id, None)
+        if key is None:
+            continue
+        results[key] = response
+        try:
+            await tr.unsubscribe(sub_id)
+        except Exception:  # noqa: BLE001
+            pass
+    for sub_id in list(pending):
+        try:
+            await tr.unsubscribe(sub_id)
+        except Exception:  # noqa: BLE001
+            pass
+    return results
+
+
+# ------------------------------------------------------------------ portefeuille
+
+
+def _kind_from_type(type_id: Any) -> str | None:
+    text = str(type_id or "").lower()
+    if not text:
+        return None
+    if "crypto" in text:
+        return "crypto"
+    if "fund" in text or "etf" in text:
+        return "etf"
+    if "stock" in text or "share" in text:
+        return "stock"
+    if "bond" in text:
+        return "bond"
+    return text
+
+
+async def _portfolio_positions(tr: Any) -> tuple[list[dict], list[str]]:
+    """Positions du portefeuille, valorisées au dernier cours Trade Republic."""
+    warnings: list[str] = []
+    portfolio = _as_dict(await _fetch_one(tr, tr.compact_portfolio()))
     rows: list[dict] = []
-    payload = _as_dict(response)
-    categories = payload.get("categories")
-    if isinstance(categories, list):
-        for category in categories:
-            rows.extend(_as_dict(category).get("positions") or [])
-    elif isinstance(payload.get("positions"), list):
-        rows = payload["positions"]
-    elif isinstance(response, list):
-        rows = response
+    for category in portfolio.get("categories") or []:
+        category = _as_dict(category)
+        for row in category.get("positions") or []:
+            row = dict(_as_dict(row))
+            row.setdefault("_category", category.get("categoryType"))
+            rows.append(row)
+    if not rows and isinstance(portfolio.get("positions"), list):
+        rows = [dict(_as_dict(row)) for row in portfolio["positions"]]
+
+    isins = [str(_first(row, "isin", "instrumentId")) for row in rows if _first(row, "isin", "instrumentId")]
+    details = await _fetch_many(tr, {isin: tr.instrument_details(isin) for isin in isins})
+    tickers: dict = {}
+    for isin in isins:
+        exchanges = _as_dict(details.get(isin)).get("exchangeIds") or []
+        if exchanges:
+            tickers[isin] = tr.ticker(isin, exchange=exchanges[0])
+    quotes = await _fetch_many(tr, tickers, timeout=10.0)
+
     positions = []
     for row in rows:
-        row = _as_dict(row)
         isin = _first(row, "isin", "instrumentId")
+        detail = _as_dict(details.get(isin))
+        quantity = _to_float(_first(row, "netSize", "quantity", "shares")) or 0.0
+        if quantity <= 0:
+            continue
+        price = _to_float(_as_dict(_as_dict(quotes.get(isin)).get("last")).get("price"))
+        if price is None:
+            price = _to_float(_first(row, "averageBuyIn", "averagePrice"))
+            if price is not None:
+                warnings.append(
+                    f"Cours indisponible pour {detail.get('shortName') or isin} : valorisé au prix de revient moyen."
+                )
+        name = detail.get("shortName") or detail.get("name") or _first(row, "name") or isin
+        # Obligations : cours exprimé en pourcentage du nominal.
+        if price is not None and _kind_from_type(detail.get("typeId")) == "bond":
+            price = price / 100
         positions.append(
             {
                 "accountId": "securities",
                 "isin": isin,
-                "name": _first(row, "name") or isin or "Titre Trade Republic",
-                "quantity": _to_float(_first(row, "netSize", "quantity", "shares")) or 0.0,
-                # Le prix de marché n'est pas fourni par le portefeuille : il faut un
-                # abonnement « ticker » séparé. On ne l'approxime pas en silence.
-                "price": None,
-                "currency": _first(row, "currency") or "EUR",
-                "kind": _first(row, "assetClass", "kind"),
+                "name": name or "Titre Trade Republic",
+                "quantity": quantity,
+                "price": price,
+                "currency": "EUR",
+                "kind": _kind_from_type(detail.get("typeId") or row.get("_category")),
             }
         )
-    return positions
+    return positions, warnings
 
 
-def _normalize_event_detail(item: dict, detail: Any) -> dict | None:
-    """Extrait un mouvement d'un événement de timeline (best-effort, NON VÉRIFIÉ)."""
-    detail = _as_dict(detail)
-    event_type = str(_first(detail, "eventType", "type") or _first(item, "eventType", "type") or "")
-    amount = _to_float(_first(detail, "amount", "value")) or 0.0
-    if isinstance(detail.get("amount"), dict):
-        amount = _to_float(detail["amount"].get("value")) or 0.0
-    isin = _first(detail, "isin", "instrumentId")
-    return {
-        "id": str(_first(item, "id", "timelineId") or "") or None,
-        "date": _iso_date(_first(item, "timestamp", "date")) or date.today().isoformat(),
-        "category": None,
-        "type": event_type or None,
-        "description": _first(item, "title", "subtitle") or event_type or "Mouvement Trade Republic",
-        "name": _first(detail, "name", "title"),
-        "isin": isin,
-        "quantity": _to_float(_first(detail, "shares", "quantity")),
-        "price": _to_float(_first(detail, "price")),
-        "amount": amount,
-        "currency": _first(detail, "currency") or "EUR",
-        "fees": _to_float(_first(detail, "fee", "fees")) or 0.0,
-        "taxes": _to_float(_first(detail, "tax", "taxes")) or 0.0,
-    }
+def _cash_total(response: Any) -> float | None:
+    """Espèces en euros : la réponse est une liste de comptes {currencyId, amount}."""
+    entries = response if isinstance(response, list) else [response]
+    total = None
+    for entry in entries:
+        entry = _as_dict(entry)
+        currency = str(_first(entry, "currencyId", "currency") or "EUR").upper()
+        amount = _to_float(_first(entry, "amount", "value"))
+        if amount is None or currency != "EUR":
+            continue
+        total = (total or 0.0) + amount
+    return total
+
+
+# ------------------------------------------------------------------ mouvements
+
+#: Types (vocabulaire de ``pytr.event``) -> (catégorie, type) du relevé Trade Republic.
+EVENT_TYPE_MAP = {
+    "BUY": ("TRADING", "BUY"),
+    "SELL": ("TRADING", "SELL"),
+    "DIVIDEND": ("CASH", "DIVIDEND"),
+    "INTEREST": ("CASH", "INTEREST_PAYMENT"),
+    "DEPOSIT": ("CASH", "TRANSFER_INBOUND"),
+    "TRANSFER_IN": ("CASH", "TRANSFER_INBOUND"),
+    "REMOVAL": ("CASH", "TRANSFER_OUTBOUND"),
+    "TRANSFER_OUT": ("CASH", "TRANSFER_OUTBOUND"),
+    "SPLIT": ("CORPORATE_ACTION", "SPLIT"),
+    "TAXES": ("CASH", "TAXES"),
+    "TAX_REFUND": ("CASH", "TAX_REFUND"),
+    "FEES": ("CASH", "FEES"),
+}
 
 
 async def _timeline_items(tr: Any, since: str | None) -> list[dict]:
-    response = await tr.timeline_transactions()
-    response = _as_dict(response)
-    items = list(response.get("items") or [])
-    cursor = _as_dict(response.get("cursors")).get("after")
-    # Pagination bornée : on s'arrête dès que les événements deviennent antérieurs
-    # à `since`, ou après MAX_TIMELINE_ITEMS.
-    while cursor and len(items) < MAX_TIMELINE_ITEMS and since is None:
-        response = _as_dict(await tr.timeline_transactions(cursor))
-        batch = list(response.get("items") or [])
+    items: list[dict] = []
+    cursor = None
+    while len(items) < MAX_TIMELINE_ITEMS:
+        response = _as_dict(await _fetch_one(tr, tr.timeline_transactions(cursor)))
+        batch = [_as_dict(item) for item in response.get("items") or []]
         if not batch:
             break
         items.extend(batch)
+        if since and any((item.get("timestamp") or "")[:10] < since for item in batch):
+            break
         cursor = _as_dict(response.get("cursors")).get("after")
+        if not cursor:
+            break
     if since:
         items = [item for item in items if (item.get("timestamp") or "")[:10] >= since]
     return items[:MAX_TIMELINE_ITEMS]
 
 
+def _event_type_name(event: Any, value: float | None) -> str | None:
+    kind = getattr(event, "event_type", None)
+    if kind is None:
+        return None
+    name = getattr(kind, "name", str(kind))
+    # Types « conditionnels » de pytr : achat/vente selon le sens du montant.
+    if name in ("TRADE_INVOICE", "PRIVATE_MARKETS_ORDER"):
+        return "SELL" if (value or 0) > 0 else "BUY"
+    if name == "SAVEBACK":
+        return "BUY"
+    return name
+
+
+def _movement_from_event(item: dict) -> dict | None:
+    from pytr.event import Event
+
+    try:
+        event = Event.from_dict(item)
+    except Exception:  # noqa: BLE001 - un événement illisible ne bloque pas le lot
+        return None
+    value = _to_float(getattr(event, "value", None))
+    type_name = _event_type_name(event, value)
+    if type_name is None or value is None:
+        return None
+    category, tr_type = EVENT_TYPE_MAP.get(type_name, ("CASH", type_name))
+    shares = _to_float(getattr(event, "shares", None))
+    price = abs(value) / shares if shares else None
+    return {
+        "id": str(item.get("id") or "") or None,
+        "date": _iso_date(item.get("timestamp")) or date.today().isoformat(),
+        "category": category,
+        "type": tr_type,
+        "description": " — ".join(part for part in (item.get("title"), item.get("subtitle")) if part)
+        or "Mouvement Trade Republic",
+        "name": item.get("title"),
+        "isin": getattr(event, "isin", None),
+        "quantity": shares,
+        "price": price,
+        "amount": value,
+        "currency": _as_dict(item.get("amount")).get("currency") or "EUR",
+        "fees": abs(_to_float(getattr(event, "fees", None)) or 0.0),
+        "taxes": abs(_to_float(getattr(event, "taxes", None)) or 0.0),
+    }
+
+
 def _fetch_movements(tr: Any, since: str | None) -> list[dict]:
     async def gather() -> list[dict]:
         items = await _timeline_items(tr, since)
+        details: dict = {}
+        ids = [item["id"] for item in items if item.get("id")]
+        for start in range(0, len(ids), 25):
+            chunk = ids[start : start + 25]
+            details.update(await _fetch_many(tr, {item_id: tr.timeline_detail_v2(item_id) for item_id in chunk}))
         movements: list[dict] = []
         for item in items:
-            detail = None
-            item_id = item.get("id")
-            if item_id:
-                try:
-                    detail = await tr.timeline_detail_v2(item_id)
-                except Exception:  # noqa: BLE001 - un détail manquant ne bloque pas le lot
-                    detail = None
-            normalized = _normalize_event_detail(_as_dict(item), detail)
-            if normalized:
-                movements.append(normalized)
+            if item.get("id") in details:
+                item = {**item, "details": details[item["id"]]}
+            movement = _movement_from_event(item)
+            if movement:
+                movements.append(movement)
         return movements
 
     return _run(gather())
@@ -427,15 +571,13 @@ def operation_test(_tr: Any, _params: dict) -> dict:
 
 
 def operation_portfolio(tr: Any, _params: dict) -> dict:
-    async def gather() -> tuple[Any, Any]:
+    async def gather() -> tuple[list[dict], list[str], Any]:
         # Une seule boucle d'événements pour toutes les lectures d'une opération.
-        portfolio = await tr.compact_portfolio()
-        cash = await tr.cash()
-        return portfolio, cash
+        positions, warnings = await _portfolio_positions(tr)
+        cash = await _fetch_one(tr, tr.cash())
+        return positions, warnings, cash
 
-    portfolio, cash = _run(gather())
-    positions = _normalize_positions(portfolio)
-    cash_value = _to_float(cash)
+    positions, warnings, cash = _run(gather())
     accounts = [
         {
             "id": "securities",
@@ -449,14 +591,14 @@ def operation_portfolio(tr: Any, _params: dict) -> dict:
             "name": "Compte espèces Trade Republic",
             "currency": "EUR",
             "type": "CASH",
-            "balance": cash_value,
+            "balance": _cash_total(cash),
         },
     ]
-    return {"accounts": accounts, "positions": positions}
+    return {"accounts": accounts, "positions": positions, "_warnings": warnings}
 
 
 def operation_cash(tr: Any, _params: dict) -> dict:
-    cash_value = _to_float(_run(tr.cash()))
+    cash_value = _cash_total(_run(_fetch_one(tr, tr.cash())))
     return {
         "balances": [
             {
@@ -470,7 +612,8 @@ def operation_cash(tr: Any, _params: dict) -> dict:
 
 
 def operation_positions(tr: Any, _params: dict) -> dict:
-    return {"positions": _normalize_positions(_run(tr.compact_portfolio()))}
+    positions, warnings = _run(_portfolio_positions(tr))
+    return {"positions": positions, "_warnings": warnings}
 
 
 def operation_transactions(tr: Any, params: dict) -> dict:
@@ -480,26 +623,26 @@ def operation_transactions(tr: Any, params: dict) -> dict:
 
 def operation_income(tr: Any, params: dict) -> dict:
     movements = _fetch_movements(tr, _iso_date(params.get("since")))
-    income_types = {"DIVIDEND", "INTEREST", "BENEFITS_SAVEBACK", "SAVEBACK"}
+    income_types = {"DIVIDEND": "DIVIDEND", "INTEREST_PAYMENT": "INTEREST"}
     income = [
         {
             "accountId": "cash",
             "id": movement["id"],
             "date": movement["date"],
-            "type": movement["type"],
+            "type": income_types[movement["type"]],
             "description": movement["description"],
             "amount": movement["amount"],
             "currency": movement["currency"],
             "withholdingTax": movement["taxes"],
         }
         for movement in movements
-        if str(movement.get("type") or "").upper() in income_types
+        if movement.get("type") in income_types
     ]
     return {"income": income}
 
 
 def operation_savingsplans(tr: Any, _params: dict) -> dict:
-    response = _as_dict(_run(tr.savings_plan_overview()))
+    response = _as_dict(_run(_fetch_one(tr, tr.savings_plan_overview())))
     plans = []
     for plan in response.get("savingsPlans", []) or []:
         plan = _as_dict(plan)
@@ -539,7 +682,8 @@ def handle(operation: str, params: dict, secrets: dict) -> dict:
     try:
         tr = _open_api(secrets, params)
         data = HANDLERS[operation](tr, params)
-        return {"ok": True, "data": data}
+        warnings = data.pop("_warnings", []) if isinstance(data, dict) else []
+        return {"ok": True, "data": data, "warnings": warnings}
     except SidecarError as exc:
         return _fail(exc.code, exc.message, exc.requires_user_action)
     except Exception as exc:  # noqa: BLE001 - dernier filet
