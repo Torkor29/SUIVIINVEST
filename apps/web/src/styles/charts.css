@@ -150,3 +150,47 @@
 .sparkline {
   width: 100%;
 }
+
+/* Seconde courbe (montant investi) : pointillés discrets. */
+.chart-line-secondary {
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-tooltip-row {
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.chart-tooltip-row > span {
+  color: var(--muted);
+}
+
+.chart-tooltip-row.is-secondary strong {
+  color: var(--text-soft);
+  font-weight: 600;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.chart-legend-item::before {
+  display: inline-block;
+  width: 16px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top: 2px solid var(--text);
+  content: '';
+}
+
+.chart-legend-item.is-secondary::before {
+  border-top: 2px dashed var(--muted);
+}

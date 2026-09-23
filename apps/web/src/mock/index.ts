@@ -29,6 +29,7 @@ import {
   syncRuns,
 } from './reporting.ts';
 import { MOCK_WALLETS, mockSyncAllResponse, mockSyncOutcome, mockWalletResync } from './sync.ts';
+import { assetSearch, demoAsset, holdingDetail, holdingsHistory, holdingsOverview } from './portfolio.ts';
 import type { PeriodKey } from '@suiviinvest/api-contract';
 
 export const MOCK_CSRF_TOKEN = 'mock-csrf-token';
@@ -149,6 +150,25 @@ export function mockRequest(url: string, method: string, body: unknown): unknown
   if (path === '/api/networth') return netWorthResponse(periodFrom(params));
   if (path === '/api/accounts') return accountsResponse();
   if (path === '/api/investments') return investmentsResponse(params.get('accountId'));
+  if (path === '/api/holdings') return holdingsOverview();
+  if (path === '/api/holdings/history') return holdingsHistory(periodFrom(params));
+  if (path === '/api/holdings/search') return assetSearch(params.get('q') ?? '');
+  if (path === '/api/holdings/refresh') return { instruments: 12, quotes: 12, errors: [], executions: 0 };
+  if (path === '/api/holdings/plans') return holdingsOverview().plans;
+  if (path === '/api/holdings/assets' && method === 'POST') {
+    return { asset: demoAsset(bodyField<string>(body, 'symbol', 'NVDA')), quotes: 1250, warning: null };
+  }
+  if (path.startsWith('/api/holdings/assets/') && !path.endsWith('/price')) {
+    return holdingDetail(path.split('/')[4] ?? '', periodFrom(params));
+  }
+  if (path.startsWith('/api/holdings/')) {
+    // Écritures de démonstration : acceptées, sans effet (aucune donnée réelle).
+    if (path.startsWith('/api/holdings/plans')) return holdingsOverview().plans[0];
+    if (path.startsWith('/api/holdings/operations') && method === 'POST') {
+      return holdingDetail('ins-nvda', '1Y')?.operations[0];
+    }
+    return { ok: true };
+  }
   if (path === '/api/crypto') return cryptoResponse();
   if (path === '/api/real-estate') return realEstateResponse();
   const propertyMatch = /^\/api\/real-estate\/([^/]+)$/.exec(path);

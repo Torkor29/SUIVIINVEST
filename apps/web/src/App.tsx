@@ -8,6 +8,7 @@ import { ProfilePage } from './pages/Profile.tsx';
 import { BankReturnPage } from './pages/BankReturn.tsx';
 import { DashboardPage } from './pages/Dashboard.tsx';
 import { InvestmentsPage } from './pages/Investments.tsx';
+import { HoldingDetailPage } from './pages/HoldingDetail.tsx';
 import { CryptoPage } from './pages/Crypto.tsx';
 import { RealEstatePage } from './pages/RealEstate.tsx';
 import { CashPage } from './pages/Cash.tsx';
@@ -25,6 +26,7 @@ function RoutesTree() {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/investissements" element={<InvestmentsPage />} />
+        <Route path="/investissements/:id" element={<HoldingDetailPage />} />
         <Route path="/crypto" element={<CryptoPage />} />
         <Route path="/immobilier" element={<RealEstatePage />} />
         <Route path="/tresorerie" element={<CashPage />} />

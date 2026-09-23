@@ -22,7 +22,7 @@ import { ConnectionRepository } from '../../repositories/connections.ts';
 import { MarketRepository } from '../../repositories/market.ts';
 
 /** Sources crypto qui ne sont pas des adresses EVM : elles ont leur propre carte de connexion. */
-const NON_EVM_PROVIDERS: ReadonlySet<string> = new Set(['bitcoin', 'solana', 'binance', 'kraken', 'coinbase', 'bitpanda']);
+const NON_EVM_PROVIDERS: ReadonlySet<string> = new Set(['bitcoin', 'solana', 'binance', 'kraken', 'coinbase', 'bitpanda', 'manual']);
 
 interface ChainSyncStateRow {
   connection_id: string;

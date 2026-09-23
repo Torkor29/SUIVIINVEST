@@ -30,6 +30,7 @@ import { ImportService } from './services/imports.ts';
 import { MarketDataService, type PriceProvider } from './services/marketdata.ts';
 import { HoldingsService } from './services/holdings.ts';
 import { MarketClient } from './services/market-client.ts';
+import { createE2eMarketFetch } from './testing/e2e-market.ts';
 import { registerHoldingsRoutes } from './routes/holdings.ts';
 import { PortfolioService } from './services/portfolio.ts';
 import { RealEstateService } from './services/realestate.ts';
@@ -135,9 +136,10 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     ...(deps.providers ? { providers: deps.providers } : {}),
     ...(deps.now ? { now: deps.now } : {}),
   });
+  const marketFetch = deps.marketFetch ?? (useE2eConnectors ? createE2eMarketFetch() : undefined);
   const holdings = new HoldingsService(db, {
     client: new MarketClient({
-      ...(deps.marketFetch ? { fetchImpl: deps.marketFetch, retryDelayMs: 0 } : {}),
+      ...(marketFetch ? { fetchImpl: marketFetch, retryDelayMs: 0 } : {}),
       ...(deps.now ? { now: deps.now } : {}),
     }),
     ...(deps.now ? { now: deps.now } : {}),

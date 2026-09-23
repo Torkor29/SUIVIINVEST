@@ -15,6 +15,7 @@ et liquidités, réunis dans une seule vue.
 ## Sommaire
 
 - [Ce que fait l'application](#ce-que-fait-lapplication)
+- [Mes investissements : saisie, cours suivis, DCA](#mes-investissements--saisie-cours-suivis-dca)
 - [Installer ou mettre à jour depuis GitHub](#installer-ou-mettre-à-jour-depuis-github-le-plus-simple)
 - [Déploiement sur Ubuntu (pas à pas)](#déploiement-sur-ubuntu-pas-à-pas)
 - [Reverse proxy HTTPS (Nginx)](#reverse-proxy-https-nginx)
@@ -31,7 +32,7 @@ et liquidités, réunis dans une seule vue.
 | Domaine | Contenu |
 | --- | --- |
 | **Accueil** | Patrimoine net, variations (jour, 1 mois, YTD, 1 an, depuis le début), graphique 1D→MAX, répartition par classe et par établissement |
-| **Investissements** | Positions, PRU (coût moyen pondéré), plus-values latentes/réalisées, dividendes, frais, TWR, XIRR, allocation |
+| **Investissements** | Actions, ETF, fonds, cryptos, obligations **déclarés à la main** et suivis au cours du marché ; achats, ventes, **investissements programmés (DCA)** ; courbes du cours, de chaque ligne et du portefeuille (valeur vs investi) ; plus-values, répartition |
 | **Crypto** | Wallets par adresse publique, multi-chaînes (Ethereum, Arbitrum, Optimism, Base, Polygon, BNB Chain, Avalanche), tokens ERC-20, gas, staking |
 | **Immobilier** | Fiche complète (bien, crédit, revenus, charges), échéancier, rendements brut/net/sur apport, cash-flow, equity |
 | **Banque** | Comptes bancaires, soldes, devise d'origine |
@@ -42,6 +43,36 @@ et liquidités, réunis dans une seule vue.
 | **Imports** | Assistant complet : détection du format, aperçu, mapping des colonnes, détection des doublons, import idempotent |
 | **Profil** | Nom, identifiant, e-mail chiffré, mot de passe, code de secours, appareils connectés, membres |
 | **Paramètres** | Thème, cours de bourse, sauvegardes chiffrées, état de la sécurité et du serveur |
+
+## Mes investissements : saisie, cours suivis, DCA
+
+Le moyen le plus simple et le plus fiable : **déclarer ce que vous possédez**, l'application
+s'occupe des cours. Aucune connexion à un courtier n'est nécessaire.
+
+1. **Investissements → Ajouter**, puis cherchez l'actif par nom, symbole ou ISIN
+   (« Nvidia », « AI.PA », « IE00B5BMR087 », « Bitcoin »).
+2. Choisissez :
+   - **Achat ponctuel** : date, quantité *ou* montant, prix payé (facultatif : sinon cours de
+     clôture du jour), frais. Pour une position déjà détenue, indiquez sa date et votre PRU ;
+   - **Investissement programmé** : « 200 $ chaque mois le 10, depuis janvier 2025 ». Les
+     échéances passées sont **rattrapées** au cours de clôture de chaque jour (ou du jour de
+     bourse suivant), en fractions de titre, avec conversion au taux BCE du jour ; les suivantes
+     s'ajoutent **automatiquement**. Pause, reprise, modification (pour l'avenir), suppression
+     avec ou sans les achats déjà calculés.
+3. La fiche de chaque actif montre le cours (1 S → MAX), la valeur de votre ligne face au
+   montant investi, le PRU, les plus-values, toutes les opérations (supprimables).
+
+**Cours** : Yahoo Finance (actions, ETF, fonds, cryptos), CoinGecko et Kraken (cryptos),
+Stooq en secours ; taux de change BCE via Frankfurter. Tous sont gratuits et sans clé. Les
+cours sont convertis en euros et rafraîchis quatre fois par jour (8 h, 13 h, 18 h, 23 h à
+l'heure du serveur, UTC sous Docker ; réglable : `SUIVIINVEST_PRICES_CRON`), ainsi qu'au démarrage ; le bouton « Actualiser les cours » force
+une mise à jour. **Obligations et actifs non cotés** : « L'ajouter à la main », puis saisissez
+le cours quand il change.
+
+Ces investissements vivent dans deux comptes créés automatiquement, « Mes investissements » et
+« Mes cryptos » : ils comptent dans le patrimoine, le tableau de bord et les analyses. Les
+connexions (banques, wallets, courtiers) restent disponibles en complément, et leurs positions
+apparaissent aussi dans Investissements.
 
 ### Sources de données
 

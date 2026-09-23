@@ -75,11 +75,16 @@ export function DashboardPage() {
             {data.total === 0 && data.byClass.length === 0 ? (
               <EmptyState
                 title="Votre patrimoine s’affichera ici"
-                hint="Ajoutez une première source — courtier, banque ou wallet — ou importez un relevé : tout se consolide automatiquement."
+                hint="Déclarez vos investissements (actions, ETF, cryptos, obligations) : les cours se mettent à jour tout seuls. Vous pouvez aussi relier une banque ou un wallet."
                 action={
-                  <Link className="btn btn-primary" to="/connexions">
-                    Ajouter une source
-                  </Link>
+                  <span className="card-actions-row">
+                    <Link className="btn btn-primary" to="/investissements">
+                      Ajouter un investissement
+                    </Link>
+                    <Link className="btn" to="/connexions">
+                      Relier une source
+                    </Link>
+                  </span>
                 }
               />
             ) : (

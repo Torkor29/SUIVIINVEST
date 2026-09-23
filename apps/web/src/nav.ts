@@ -28,7 +28,7 @@ export interface NavGroup {
 }
 
 export const HOME: NavItem = { to: '/', label: 'Accueil', short: 'Accueil', icon: IconHome, end: true };
-export const INVESTMENTS: NavItem = { to: '/investissements', label: 'Investissements', short: 'Bourse', icon: IconInvestments };
+export const INVESTMENTS: NavItem = { to: '/investissements', label: 'Investissements', short: 'Portefeuille', icon: IconInvestments };
 export const CRYPTO: NavItem = { to: '/crypto', label: 'Crypto', short: 'Crypto', icon: IconCrypto };
 export const REAL_ESTATE: NavItem = { to: '/immobilier', label: 'Immobilier', icon: IconRealEstate };
 export const CASH: NavItem = { to: '/tresorerie', label: 'Banque', icon: IconCash };

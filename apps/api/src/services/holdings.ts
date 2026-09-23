@@ -275,7 +275,11 @@ export class HoldingsService {
     const account = this.#accountFor(instrument);
     const currency = (input.currency ?? 'EUR').toUpperCase();
     const date = input.date;
-    if (date > this.#today()) throw new HoldingsError(400, 'INVALID_REQUEST', 'La date ne peut pas être dans le futur.');
+    // Un jour de marge : le serveur compte en UTC, le navigateur en heure locale
+    // (juste après minuit à Paris, « aujourd'hui » est encore la veille en UTC).
+    if (date > shiftDay(this.#today(), 1)) {
+      throw new HoldingsError(400, 'INVALID_REQUEST', 'La date ne peut pas être dans le futur.');
+    }
     const rate = await this.#rateOn(currency, date);
     const fees = round((input.fees ?? 0) * rate, 8);
 
@@ -543,8 +547,8 @@ export class HoldingsService {
         previousValue += position.value;
       }
     }
-    const value = round(sum(positions.map((position) => position.value)));
-    const invested = round(sum(positions.map((position) => position.invested)));
+    const value = round(sum(positions.map((position) => position.value)), 2);
+    const invested = round(sum(positions.map((position) => position.invested)), 2);
     for (const position of positions) {
       (position as { weightPercent: number }).weightPercent = value > 0 ? round((position.value / value) * 100, 2) : 0;
     }
@@ -557,10 +561,10 @@ export class HoldingsService {
       totals: {
         value,
         invested,
-        pnl: round(value - invested),
+        pnl: round(value - invested, 2),
         pnlPercent: invested > 0 ? round(((value - invested) / invested) * 100, 2) : 0,
-        realizedPnl: realized,
-        dayChange: round(dayChange),
+        realizedPnl: round(realized, 2),
+        dayChange: round(dayChange, 2),
         dayChangePercent: previousValue > 0 ? round((dayChange / previousValue) * 100, 2) : 0,
       },
       positions,
@@ -619,7 +623,7 @@ export class HoldingsService {
     const start = points[0];
     const end = points[points.length - 1];
     // Variation = évolution de la valeur moins l'argent ajouté sur la période.
-    const change = start && end ? round(end.value - start.value - (end.invested - start.invested)) : 0;
+    const change = start && end ? round(end.value - start.value - (end.invested - start.invested), 2) : 0;
     const base = start ? start.value + Math.max(0, (end?.invested ?? 0) - start.invested) : 0;
     return {
       period,
@@ -682,8 +686,8 @@ export class HoldingsService {
       instrument.id,
     );
     const lastPrice = latest?.close ?? null;
-    const value = round(aggregate.quantity * (lastPrice ?? (aggregate.quantity > 0 ? aggregate.invested / aggregate.quantity : 0)));
-    const invested = round(aggregate.invested);
+    const value = round(aggregate.quantity * (lastPrice ?? (aggregate.quantity > 0 ? aggregate.invested / aggregate.quantity : 0)), 2);
+    const invested = round(aggregate.invested, 2);
     const previous = recent[1]?.close;
     return {
       ...this.#assetDto(instrument),
@@ -692,9 +696,9 @@ export class HoldingsService {
       priceDate: latest?.date ?? null,
       value,
       invested,
-      pnl: round(value - invested),
+      pnl: round(value - invested, 2),
       pnlPercent: invested > 0 ? round(((value - invested) / invested) * 100, 2) : 0,
-      realizedPnl: round(aggregate.realized),
+      realizedPnl: round(aggregate.realized, 2),
       dayChangePercent: lastPrice !== null && previous ? round(((lastPrice - previous) / previous) * 100, 2) : null,
       weightPercent: 0,
       editable: aggregate.editable,
@@ -796,7 +800,7 @@ export class HoldingsService {
       fees: plan.fees,
       active: plan.active === 1,
       executions: stats?.n ?? 0,
-      investedEur: round(stats?.invested ?? 0),
+      investedEur: round(stats?.invested ?? 0, 2),
       quantity: round(stats?.qty ?? 0, 8),
       nextDate: upcoming,
       pending: plan.active === 1 ? due.length : 0,
@@ -1004,7 +1008,7 @@ function allocationByKind(positions: readonly HoldingPositionDto[]): AllocationS
     .map(([kind, value]) => ({
       key: kind,
       label: kindLabel(kind as AssetKind),
-      value: round(value),
+      value: round(value, 2),
       percent: total > 0 ? round((value / total) * 100, 2) : 0,
     }));
 }
