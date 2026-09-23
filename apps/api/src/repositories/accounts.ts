@@ -166,6 +166,10 @@ export interface InstrumentRow {
   contract_address: string | null;
   decimals: number | null;
   country: string | null;
+  /** Source du cours (« yahoo », « coingecko », « manual ») — portefeuille saisi à la main. */
+  price_source?: string | null;
+  price_symbol?: string | null;
+  quote_currency?: string | null;
   created_at: string;
   updated_at: string;
 }

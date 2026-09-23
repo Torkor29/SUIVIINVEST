@@ -19,6 +19,11 @@ export interface SchedulerOptions {
   /** Relevé quotidien du patrimoine : une fois par jour, valeur totale et par compte. */
   readonly snapshotCron: string;
   readonly snapshots: { recordDailySnapshot(): { date: string; total: number; accounts: number } };
+  /** Cours suivis + investissements programmés (portefeuille saisi à la main). */
+  readonly pricesCron?: string;
+  readonly holdings?: {
+    refreshAll(): Promise<{ instruments: number; quotes: number; errors: string[]; executions: number }>;
+  };
   readonly logger: Logger;
   readonly sync: SyncService;
   readonly backup: BackupService;
@@ -37,6 +42,7 @@ export class Scheduler implements SchedulerState {
   #syncJob: Cron | null = null;
   #backupJob: Cron | null = null;
   #snapshotJob: Cron | null = null;
+  #pricesJob: Cron | null = null;
   #lastRunAt: string | null = null;
 
   constructor(options: SchedulerOptions) {
@@ -97,6 +103,15 @@ export class Scheduler implements SchedulerState {
       }
     });
 
+    const holdings = this.#options.holdings;
+    if (holdings && this.#options.pricesCron) {
+      this.#pricesJob = new Cron(this.#options.pricesCron, { protect: true }, async () => {
+        await this.refreshPrices();
+      });
+      // Au démarrage : cours à jour et échéances manquées pendant l'arrêt rattrapées.
+      setTimeout(() => void this.refreshPrices(), 5_000).unref();
+    }
+
     logger.info('Ordonnanceur démarré', {
       syncCron: this.#options.syncCron,
       backupCron: this.#options.backupCron,
@@ -104,6 +119,26 @@ export class Scheduler implements SchedulerState {
       nextBackup: this.#backupJob.nextRun()?.toISOString() ?? null,
       nextSnapshot: this.#snapshotJob.nextRun()?.toISOString() ?? null,
     });
+  }
+
+  /** Cours suivis et investissements programmés ; ne lève jamais. */
+  async refreshPrices(): Promise<void> {
+    const holdings = this.#options.holdings;
+    if (!holdings) return;
+    try {
+      const result = await holdings.refreshAll();
+      this.#options.logger.info('Cours et investissements programmés à jour', {
+        instruments: result.instruments,
+        quotes: result.quotes,
+        executions: result.executions,
+        errors: result.errors.length,
+      });
+      for (const error of result.errors.slice(0, 5)) this.#options.logger.warn(error);
+    } catch (error) {
+      this.#options.logger.error('Mise à jour des cours en échec', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** Exécute immédiatement une synchronisation complète (bouton « Synchroniser tout »). */
@@ -127,6 +162,8 @@ export class Scheduler implements SchedulerState {
     this.#syncJob?.stop();
     this.#backupJob?.stop();
     this.#snapshotJob?.stop();
+    this.#pricesJob?.stop();
+    this.#pricesJob = null;
     this.#syncJob = null;
     this.#backupJob = null;
     this.#snapshotJob = null;

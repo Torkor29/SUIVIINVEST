@@ -110,6 +110,9 @@ export interface TestAppOptions {
   readonly env?: Record<string, string>;
   readonly mailer?: Mailer;
   readonly connectorHttp?: Parameters<typeof buildApp>[0]['connectorHttp'];
+  /** Réseau des cours (portefeuille saisi à la main) ; par défaut : aucun accès. */
+  readonly marketFetch?: typeof fetch;
+  readonly now?: () => Date;
 }
 
 export async function createTestApp(options: TestAppOptions = {}): Promise<TestContext> {
@@ -137,6 +140,12 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
     registry,
     ...(options.mailer ? { mailer: options.mailer } : {}),
     ...(options.connectorHttp ? { connectorHttp: options.connectorHttp } : {}),
+    marketFetch:
+      options.marketFetch ??
+      (async () => {
+        throw new Error('Réseau désactivé en test');
+      }),
+    ...(options.now ? { now: options.now } : {}),
     providers: options.providers ?? [
       new StaticPriceProvider({
         quotes: { unset: [] },

@@ -417,6 +417,44 @@ CREATE TABLE password_resets (
 CREATE INDEX idx_password_resets_user ON password_resets(user_id);
 `;
 
+/**
+ * Version 8 — portefeuille saisi à la main.
+ *
+ * L'utilisateur déclare ses investissements (achat ponctuel, position existante,
+ * investissement programmé) ; l'application suit les cours :
+ *  - `instruments.price_source` / `price_symbol` : où lire le cours (« yahoo »
+ *    avec le symbole Yahoo, « coingecko » avec l'identifiant CoinGecko, ou
+ *    « manual » quand aucune source publique n'existe, ex. une obligation) ;
+ *    `quote_currency` : devise d'origine de la cotation (les cours sont stockés
+ *    convertis en euros dans `quotes`) ;
+ *  - `dca_plans` : investissements programmés. Chaque échéance passée devient
+ *    un achat (activité `manual.dca`, identifiant `dca:<plan>:<date>`), calculé
+ *    au cours de clôture du jour de bourse correspondant.
+ */
+const MANUAL_PORTFOLIO_V8 = `
+ALTER TABLE instruments ADD COLUMN price_source TEXT;
+ALTER TABLE instruments ADD COLUMN price_symbol TEXT;
+ALTER TABLE instruments ADD COLUMN quote_currency TEXT;
+
+CREATE TABLE dca_plans (
+  id            TEXT PRIMARY KEY,
+  instrument_id TEXT NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+  account_id    TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  amount        REAL NOT NULL CHECK (amount > 0),
+  currency      TEXT NOT NULL,
+  frequency     TEXT NOT NULL CHECK (frequency IN ('WEEKLY','MONTHLY','QUARTERLY')),
+  day_of_month  INTEGER NOT NULL DEFAULT 1 CHECK (day_of_month BETWEEN 1 AND 31),
+  weekday       INTEGER CHECK (weekday BETWEEN 1 AND 7),
+  start_date    TEXT NOT NULL,
+  end_date      TEXT,
+  fees          REAL NOT NULL DEFAULT 0,
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX idx_dca_plans_instrument ON dca_plans(instrument_id);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
@@ -425,4 +463,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 5, name: 'position_quantities', statements: [POSITION_QUANTITIES_V5] },
   { version: 6, name: 'accounts_and_recovery', statements: [ACCOUNTS_V6] },
   { version: 7, name: 'account_email_and_resets', statements: [ACCOUNT_EMAIL_V7] },
+  { version: 8, name: 'manual_portfolio', statements: [MANUAL_PORTFOLIO_V8] },
 ];

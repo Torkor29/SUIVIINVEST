@@ -28,6 +28,9 @@ import { BackupService } from './services/backup.ts';
 import { CryptoService } from './services/crypto.ts';
 import { ImportService } from './services/imports.ts';
 import { MarketDataService, type PriceProvider } from './services/marketdata.ts';
+import { HoldingsService } from './services/holdings.ts';
+import { MarketClient } from './services/market-client.ts';
+import { registerHoldingsRoutes } from './routes/holdings.ts';
 import { PortfolioService } from './services/portfolio.ts';
 import { RealEstateService } from './services/realestate.ts';
 import { SyncService } from './services/sync.ts';
@@ -66,6 +69,8 @@ export interface AppDeps {
   readonly mailer?: Mailer;
   /** Client HTTP des routes Enable Banking et des connecteurs (tests : réponses simulées). */
   readonly connectorHttp?: HttpClient;
+  /** `fetch` des cours du portefeuille saisi à la main (tests : réponses simulées). */
+  readonly marketFetch?: typeof fetch;
   readonly schedulerState?: { current: { isRunning: () => boolean; nextRun: () => string | null; lastRun: () => string | null } | null };
 }
 
@@ -84,6 +89,7 @@ export interface BuiltApp {
   readonly settings: SettingsRepository;
   readonly audit: AuditRepository;
   readonly properties: PropertyRepository;
+  readonly holdings: HoldingsService;
 }
 
 export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
@@ -127,6 +133,13 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   const marketData = new MarketDataService({
     db,
     ...(deps.providers ? { providers: deps.providers } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+  });
+  const holdings = new HoldingsService(db, {
+    client: new MarketClient({
+      ...(deps.marketFetch ? { fetchImpl: deps.marketFetch, retryDelayMs: 0 } : {}),
+      ...(deps.now ? { now: deps.now } : {}),
+    }),
     ...(deps.now ? { now: deps.now } : {}),
   });
   // Sidecars Python (DEGIRO, Trade Republic) : branchés seulement sur le registre
@@ -252,6 +265,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // Saisie manuelle : indispensable pour les sources qui ne fournissent pas les
   // positions (Crédit Agricole) — l'utilisateur complète ce que l'API ne donne pas.
   await registerManualRoutes(app, { db });
+  // Portefeuille saisi à la main : actifs, achats, ventes, investissements programmés.
+  await registerHoldingsRoutes(app, { holdings, audit });
   // Portefeuilles EVM : état par chaîne et resynchronisation d'un wallet.
   await registerWalletRoutes(app, { db, sync });
   // Banques via Enable Banking : configuration, choix de la banque, retour d'autorisation.
@@ -315,7 +330,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     });
   }
 
-  return { app, db, auth, secrets, sync, imports, marketData, backup, portfolio, crypto, realEstate, settings, audit, properties };
+  return { app, db, auth, secrets, sync, imports, marketData, backup, portfolio, crypto, realEstate, settings, audit, properties, holdings };
 }
 
 /**

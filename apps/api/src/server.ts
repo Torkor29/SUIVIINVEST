@@ -49,6 +49,8 @@ async function main(): Promise<void> {
     snapshots: {
       recordDailySnapshot: () => built.portfolio.recordDailySnapshot(),
     },
+    pricesCron: config.pricesCron,
+    holdings: built.holdings,
   });
   scheduler.start();
   schedulerState.current = scheduler;

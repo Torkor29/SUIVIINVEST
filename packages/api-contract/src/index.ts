@@ -886,3 +886,177 @@ export interface MarketDataRefreshResponse {
   readonly providers: readonly { provider: string; instruments: number; errors: number }[];
   readonly message: string;
 }
+/* ------------------------------------------------ portefeuille saisi à la main */
+
+export type HoldingKind = 'EQUITY' | 'ETF' | 'FUND' | 'BOND' | 'CRYPTO' | 'OTHER';
+export type HoldingPriceSource = 'yahoo' | 'coingecko' | 'manual';
+
+export interface AssetSearchResultDto {
+  readonly source: 'yahoo' | 'coingecko';
+  readonly priceSymbol: string;
+  readonly symbol: string;
+  readonly name: string;
+  readonly kind: HoldingKind;
+  readonly exchange: string | null;
+  readonly typeLabel: string;
+  readonly isin: string | null;
+}
+
+export interface AssetSearchResponse {
+  readonly results: readonly AssetSearchResultDto[];
+  readonly unavailable: readonly string[];
+}
+
+export interface AddAssetRequest {
+  readonly source: HoldingPriceSource;
+  /** Symbole de la source (Yahoo « NVDA », CoinGecko « bitcoin ») ; absent pour « manual ». */
+  readonly priceSymbol?: string;
+  readonly symbol?: string;
+  readonly name: string;
+  readonly kind: HoldingKind;
+  readonly isin?: string | null;
+  readonly exchange?: string | null;
+  /** Devise du cours saisi à la main (source « manual »). */
+  readonly currency?: string;
+}
+
+export interface HoldingAssetDto {
+  readonly instrumentId: string;
+  readonly name: string;
+  readonly symbol: string | null;
+  readonly isin: string | null;
+  readonly kind: HoldingKind;
+  readonly kindLabel: string;
+  readonly exchange: string | null;
+  readonly priceSource: HoldingPriceSource | null;
+  readonly priceSymbol: string | null;
+  readonly quoteCurrency: string | null;
+}
+
+export interface HoldingPositionDto extends HoldingAssetDto {
+  readonly quantity: number;
+  /** Dernier cours, en euros. */
+  readonly lastPrice: number | null;
+  readonly priceDate: string | null;
+  readonly value: number;
+  /** Montant investi restant (prix de revient des titres détenus, frais inclus). */
+  readonly invested: number;
+  readonly pnl: number;
+  readonly pnlPercent: number;
+  readonly realizedPnl: number;
+  /** Variation du cours sur la dernière séance, en %. */
+  readonly dayChangePercent: number | null;
+  readonly weightPercent: number;
+  /** Au moins une ligne saisie dans SuiviInvest (modifiable ici). */
+  readonly editable: boolean;
+  readonly accounts: readonly string[];
+  /** 30 derniers cours (mini-courbe). */
+  readonly sparkline: readonly number[];
+}
+
+export interface DcaPlanDto {
+  readonly id: string;
+  readonly instrumentId: string;
+  readonly assetName: string;
+  readonly assetSymbol: string | null;
+  readonly amount: number;
+  readonly currency: string;
+  readonly frequency: 'WEEKLY' | 'MONTHLY' | 'QUARTERLY';
+  readonly dayOfMonth: number;
+  readonly startDate: string;
+  readonly endDate: string | null;
+  readonly fees: number;
+  readonly active: boolean;
+  readonly executions: number;
+  /** Total investi par ce plan, en euros. */
+  readonly investedEur: number;
+  readonly quantity: number;
+  readonly nextDate: string | null;
+  /** Échéances passées sans cours disponible (calculées dès que le cours arrive). */
+  readonly pending: number;
+}
+
+export interface HoldingsResponse {
+  readonly totals: {
+    readonly value: number;
+    readonly invested: number;
+    readonly pnl: number;
+    readonly pnlPercent: number;
+    readonly realizedPnl: number;
+    readonly dayChange: number;
+    readonly dayChangePercent: number;
+  };
+  readonly positions: readonly HoldingPositionDto[];
+  readonly plans: readonly DcaPlanDto[];
+  readonly allocation: readonly AllocationSlice[];
+  readonly lastPriceUpdate: string | null;
+  readonly warnings: readonly string[];
+}
+
+export interface HoldingOperationDto {
+  readonly id: string;
+  readonly date: string;
+  readonly type: string;
+  readonly typeLabel: string;
+  readonly quantity: number;
+  /** Prix unitaire en euros. */
+  readonly unitPrice: number | null;
+  /** Flux en euros (négatif pour un achat). */
+  readonly amount: number;
+  readonly fees: number;
+  readonly accountName: string;
+  readonly planId: string | null;
+  readonly deletable: boolean;
+  readonly description: string | null;
+}
+
+export interface HoldingValuePoint {
+  readonly date: string;
+  readonly value: number;
+  readonly invested: number;
+}
+
+export interface HoldingDetailResponse {
+  readonly asset: HoldingAssetDto;
+  readonly position: HoldingPositionDto | null;
+  readonly operations: readonly HoldingOperationDto[];
+  readonly plans: readonly DcaPlanDto[];
+  /** Cours en euros sur la période demandée. */
+  readonly prices: readonly SeriesPoint[];
+  /** Valeur de la ligne et montant investi, jour par jour. */
+  readonly history: readonly HoldingValuePoint[];
+  readonly period: PeriodKey;
+  readonly priceChangePercent: number | null;
+}
+
+export interface HoldingsHistoryResponse {
+  readonly period: PeriodKey;
+  readonly points: readonly HoldingValuePoint[];
+  readonly change: number;
+  readonly changePercent: number;
+}
+
+export interface HoldingOperationRequest {
+  readonly instrumentId: string;
+  readonly type: 'BUY' | 'SELL';
+  readonly date: string;
+  readonly quantity?: number;
+  /** Montant total (hors frais) dans `currency`, à la place de la quantité. */
+  readonly amount?: number;
+  /** Prix unitaire dans `currency` ; sinon, cours de clôture du jour. */
+  readonly unitPrice?: number;
+  readonly currency?: string;
+  readonly fees?: number;
+}
+
+export interface DcaPlanRequest {
+  readonly instrumentId: string;
+  readonly amount: number;
+  readonly currency: string;
+  readonly frequency: 'WEEKLY' | 'MONTHLY' | 'QUARTERLY';
+  readonly dayOfMonth?: number;
+  readonly startDate: string;
+  readonly endDate?: string | null;
+  readonly fees?: number;
+  readonly active?: boolean;
+}
