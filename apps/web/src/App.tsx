@@ -5,6 +5,7 @@ import { LoginPage } from './pages/Login.tsx';
 import { LogoMark } from './components/ui/Logo.tsx';
 import { ResetPasswordPage } from './pages/ResetPassword.tsx';
 import { ProfilePage } from './pages/Profile.tsx';
+import { BankReturnPage } from './pages/BankReturn.tsx';
 import { DashboardPage } from './pages/Dashboard.tsx';
 import { InvestmentsPage } from './pages/Investments.tsx';
 import { CryptoPage } from './pages/Crypto.tsx';
@@ -31,6 +32,7 @@ function RoutesTree() {
         <Route path="/revenus" element={<IncomePage />} />
         <Route path="/analyses" element={<AnalyticsPage />} />
         <Route path="/connexions" element={<ConnectionsPage />} />
+        <Route path="/connexions/banque" element={<BankReturnPage />} />
         <Route path="/profil" element={<ProfilePage />} />
         <Route path="/parametres" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />

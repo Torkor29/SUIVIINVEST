@@ -49,6 +49,13 @@ test('Kraken : positions et euros dans le patrimoine, actif vendu remis à zéro
     await authRequest(ctx, session, { method: 'POST', url: `/api/connections/${id}/sync` });
     const after = (await authRequest(ctx, session, { method: 'GET', url: '/api/networth' })).json() as { total: number };
     assert.equal(after.total, 50_000);
+    // L'actif vendu disparaît sans avertissement parasite.
+    const cryptoAfter = (await authRequest(ctx, session, { method: 'GET', url: '/api/crypto' })).json() as {
+      wallets: { assets: { symbol: string }[] }[];
+      warnings: string[];
+    };
+    assert.deepEqual(cryptoAfter.wallets[0]?.assets.map((asset) => asset.symbol), ['BTC']);
+    assert.ok(!cryptoAfter.warnings.some((warning) => warning.includes('quantité inconnue')), cryptoAfter.warnings.join('\n'));
   } finally {
     await ctx.cleanup();
   }
@@ -81,6 +88,9 @@ test('Bitcoin : plusieurs wallets possibles, adresse publique seulement', async 
     }
     const total = ((await authRequest(ctx, session, { method: 'GET', url: '/api/networth' })).json() as { total: number }).total;
     assert.equal(total, 20_000); // 2 × 0,1 BTC × 100 000 €
+    // Les wallets Bitcoin ne sont pas listés parmi les portefeuilles EVM.
+    const evm = (await authRequest(ctx, session, { method: 'GET', url: '/api/wallets' })).json() as unknown[];
+    assert.equal(evm.length, 0);
   } finally {
     await ctx.cleanup();
   }

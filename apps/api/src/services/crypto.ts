@@ -3,6 +3,7 @@ import type { AllocationSlice, CryptoAssetDto, CryptoResponse, CryptoWalletDto, 
 import type { Db } from '../db/database.ts';
 import { AccountRepository, InstrumentRepository } from '../repositories/accounts.ts';
 import { ActivityRepository, toDomainActivity, ValuationRepository } from '../repositories/activities.ts';
+import { ConnectionRepository } from '../repositories/connections.ts';
 import { MarketRepository } from '../repositories/market.ts';
 
 /**
@@ -30,6 +31,7 @@ export class CryptoService {
   readonly #activities: ActivityRepository;
   readonly #valuations: ValuationRepository;
   readonly #market: MarketRepository;
+  readonly #connections: ConnectionRepository;
 
   constructor(db: Db, options: { baseCurrency: string }) {
     this.#accounts = new AccountRepository(db);
@@ -37,6 +39,7 @@ export class CryptoService {
     this.#activities = new ActivityRepository(db);
     this.#valuations = new ValuationRepository(db);
     this.#market = new MarketRepository(db);
+    this.#connections = new ConnectionRepository(db);
     void options.baseCurrency;
   }
 
@@ -71,10 +74,10 @@ export class CryptoService {
           chains: [],
           valueEur: 0,
           assets: [],
-          lastSyncedAt: null,
+          lastSyncedAt: account.connection_id ? (this.#connections.get(account.connection_id)?.last_synced_at ?? null) : null,
         });
         warnings.push(
-          `Wallet « ${account.name} » sans activité : lancez une synchronisation pour récupérer son contenu.`,
+          `« ${account.name} » : aucun avoir détecté (portefeuille vide ou pas encore synchronisé).`,
         );
         continue;
       }
@@ -165,7 +168,9 @@ export class CryptoService {
     let lastSyncedAt: string | null = null;
     for (const position of positions) {
       if (position.date > (lastSyncedAt ?? '')) lastSyncedAt = position.date;
-      if (position.quantity === null || position.quantity <= 0) {
+      // Quantité nulle : actif vendu ou transféré depuis, simplement plus détenu.
+      if (position.quantity === 0) continue;
+      if (position.quantity === null || position.quantity < 0) {
         warnings.push(
           `Position ${position.symbol ?? position.name} ignorée : quantité inconnue (resynchronisez ce wallet).`,
         );

@@ -17,7 +17,7 @@ export function CryptoPage() {
     <>
       <PageHeader
         title="Crypto"
-        subtitle="Vos wallets suivis par adresse publique. Aucune clé privée n’est demandée."
+        subtitle="Vos wallets (adresse publique) et plateformes (clé en lecture seule). Aucune clé privée de wallet n’est demandée."
         actions={<Badge tone="info">Lecture seule</Badge>}
       />
       <AsyncView
@@ -26,7 +26,7 @@ export function CryptoPage() {
         data={state.data}
         onRetry={state.reload}
         empty={(data) => data.wallets.length === 0}
-        emptyState={<EmptyState title="Aucun portefeuille" hint="Ajoutez l’adresse publique de votre wallet dans Connexions." />}
+        emptyState={<EmptyState title="Aucun portefeuille" hint="Ajoutez un wallet (MetaMask, Ledger, Phantom…) ou une plateforme (Binance, Kraken, Coinbase, Bitpanda) dans Connexions." />}
         skeleton={
           <>
             <SkeletonTiles count={3} />
@@ -59,12 +59,16 @@ export function CryptoPage() {
               <Card
                 key={wallet.accountId}
                 title={wallet.name}
-                subtitle={`${shortenAddress(wallet.address)} · ${wallet.chains.length} chaîne(s)`}
+                subtitle={
+                  isPlatform(wallet.address)
+                    ? 'Plateforme · lecture seule'
+                    : `${shortenAddress(wallet.address)} · ${wallet.chains.length} réseau${wallet.chains.length > 1 ? 'x' : ''}`
+                }
                 actions={<Badge tone="neutral">{wallet.lastSyncedAt === null ? 'Jamais synchronisé' : `Synchro ${formatDate(wallet.lastSyncedAt)}`}</Badge>}
               >
                 <div className="wallet-total">
                   <strong>{formatEur(wallet.valueEur)}</strong>
-                  <span className="muted small">{shortenAddress(wallet.address, 10, 6)}</span>
+                  {!isPlatform(wallet.address) && <span className="muted small">{shortenAddress(wallet.address, 10, 6)}</span>}
                 </div>
                 <ul className="asset-list">
                   {wallet.assets.map((asset) => (
@@ -73,7 +77,7 @@ export function CryptoPage() {
                         <strong>{asset.symbol}</strong>
                         <small className="cell-sub">{asset.name}</small>
                       </span>
-                      <Badge tone="neutral">{asset.chain}</Badge>
+                      <Badge tone="neutral">{asset.chain === 'unknown' ? 'plateforme' : asset.chain}</Badge>
                       <span className="asset-qty">
                         {formatQuantity(asset.quantity)}
                         {asset.contractAddress !== null && <small className="cell-sub">{shortenAddress(asset.contractAddress, 8, 4)}</small>}
@@ -87,10 +91,15 @@ export function CryptoPage() {
             ))}
 
             <WarningsList warnings={data.warnings} />
-            <ReadOnlyNote text="Suivi d’adresses publiques uniquement : SuiviInvest ne peut pas signer ni déplacer vos cryptos." />
+            <ReadOnlyNote text="Adresses publiques et clés en lecture seule : SuiviInvest ne peut ni signer, ni déplacer, ni vendre vos cryptos." />
           </>
         )}
       </AsyncView>
     </>
   );
+}
+
+/** Compte de plateforme (Binance, Kraken…) : identifiant interne, pas une adresse de wallet. */
+function isPlatform(address: string): boolean {
+  return /^(binance|kraken|coinbase|bitpanda):/.test(address);
 }

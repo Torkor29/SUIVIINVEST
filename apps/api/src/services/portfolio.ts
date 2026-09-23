@@ -227,6 +227,7 @@ export class PortfolioService {
         lastActivityDate: lastActivity?.date ?? null,
         isActive: row.is_active === 1,
         externalAccountId: row.external_account_id,
+        connectionId: row.connection_id,
       });
     }
 

@@ -18,20 +18,119 @@ import type {
 
 /* ------------------------------------------------------------------- sources */
 
+export type SourceGroup = 'bank' | 'broker' | 'crypto';
+
 export interface SourceDefinition {
   readonly providerId: string;
   readonly providerName: string;
   /** Aucun accès automatique possible : import de relevés uniquement. */
   readonly importOnly?: boolean;
+  readonly group?: SourceGroup;
+  /** Plusieurs connexions possibles (plusieurs wallets, plusieurs banques…). */
+  readonly multiple?: boolean;
+  /** Une phrase : ce que cette source permet et comment. */
+  readonly description?: string;
 }
 
-/** Ordre d'affichage imposé de l'interface : une carte par source connue. */
+/** Ordre d'affichage des cinq sources historiques (une carte chacune). */
 export const SOURCE_ORDER: readonly SourceDefinition[] = [
-  { providerId: 'metamask', providerName: 'MetaMask' },
-  { providerId: 'degiro', providerName: 'DEGIRO' },
-  { providerId: 'trade_republic', providerName: 'Trade Republic' },
-  { providerId: 'credit_agricole', providerName: 'Crédit Agricole', importOnly: true },
-  { providerId: 'revolut', providerName: 'Revolut', importOnly: true },
+  { providerId: 'metamask', providerName: 'MetaMask', group: 'crypto', multiple: true },
+  { providerId: 'degiro', providerName: 'DEGIRO', group: 'broker' },
+  { providerId: 'trade_republic', providerName: 'Trade Republic', group: 'broker' },
+  { providerId: 'credit_agricole', providerName: 'Crédit Agricole', importOnly: true, group: 'bank' },
+  { providerId: 'revolut', providerName: 'Revolut', importOnly: true, group: 'bank' },
+];
+
+/** Catalogue complet, par catégorie, dans l'ordre d'affichage de la page Connexions. */
+export const SOURCE_CATALOG: readonly SourceDefinition[] = [
+  {
+    providerId: 'enable_banking',
+    providerName: 'Banques (open banking)',
+    group: 'bank',
+    multiple: true,
+    description: 'Crédit Agricole, Revolut, BNP, Boursorama… : accès officiel en lecture seule, soldes et opérations automatiques.',
+  },
+  {
+    providerId: 'credit_agricole',
+    providerName: 'Crédit Agricole (fichier)',
+    importOnly: true,
+    group: 'bank',
+    description: 'Import d’un relevé exporté du site, si vous ne passez pas par l’open banking.',
+  },
+  {
+    providerId: 'revolut',
+    providerName: 'Revolut (fichier)',
+    importOnly: true,
+    group: 'bank',
+    description: 'Import d’un relevé exporté de l’application, si vous ne passez pas par l’open banking.',
+  },
+  {
+    providerId: 'degiro',
+    providerName: 'DEGIRO',
+    group: 'broker',
+    description: 'Positions, opérations et dividendes, avec vos identifiants DEGIRO (ou import de Account.csv).',
+  },
+  {
+    providerId: 'trade_republic',
+    providerName: 'Trade Republic',
+    group: 'broker',
+    description: 'Portefeuille, espèces et opérations ; une validation dans l’appli Trade Republic est demandée.',
+  },
+  {
+    providerId: 'metamask',
+    providerName: 'Wallet EVM',
+    group: 'crypto',
+    multiple: true,
+    description: 'MetaMask, Rabby, Ledger… sur Ethereum, Base, Arbitrum, Polygon et autres, par adresse publique.',
+  },
+  {
+    providerId: 'bitcoin',
+    providerName: 'Bitcoin',
+    group: 'crypto',
+    multiple: true,
+    description: 'Adresses ou clé publique xpub/zpub (Ledger, Trezor, Sparrow…). Aucune clé privée.',
+  },
+  {
+    providerId: 'solana',
+    providerName: 'Solana',
+    group: 'crypto',
+    multiple: true,
+    description: 'Phantom, Solflare, Backpack… : SOL et jetons, par adresse publique.',
+  },
+  {
+    providerId: 'binance',
+    providerName: 'Binance',
+    group: 'crypto',
+    multiple: true,
+    description: 'Spot, épargne et financement, avec une clé API en lecture seule.',
+  },
+  {
+    providerId: 'kraken',
+    providerName: 'Kraken',
+    group: 'crypto',
+    multiple: true,
+    description: 'Soldes et staking, avec une clé API limitée à « Query Funds ».',
+  },
+  {
+    providerId: 'coinbase',
+    providerName: 'Coinbase',
+    group: 'crypto',
+    multiple: true,
+    description: 'Tous vos portefeuilles, avec une clé API « View » (lecture seule).',
+  },
+  {
+    providerId: 'bitpanda',
+    providerName: 'Bitpanda',
+    group: 'crypto',
+    multiple: true,
+    description: 'Crypto, métaux et portefeuilles en euros, avec une clé API en lecture seule.',
+  },
+];
+
+export const SOURCE_GROUPS: readonly { readonly id: SourceGroup; readonly title: string; readonly subtitle: string }[] = [
+  { id: 'bank', title: 'Banques', subtitle: 'Comptes courants et livrets, mis à jour automatiquement.' },
+  { id: 'broker', title: 'Bourse', subtitle: 'Courtiers : actions, ETF, dividendes.' },
+  { id: 'crypto', title: 'Crypto', subtitle: 'Wallets et plateformes, toujours en lecture seule.' },
 ];
 
 export type ConnectionStateKey =
@@ -348,6 +447,7 @@ export interface SourceAccountSummary {
 
 export interface AccountLike {
   readonly providerId: string;
+  readonly connectionId?: string | null;
   readonly value: number;
   readonly valueCurrency: string;
 }
@@ -358,12 +458,17 @@ export interface AccountLike {
  * Seules les valeurs libellées en euros sont additionnées : une devise
  * différente est comptée à part, jamais convertie au jugé côté client.
  */
-export function summarizeAccounts(accounts: readonly AccountLike[], providerId: string): SourceAccountSummary {
+export function summarizeAccounts(
+  accounts: readonly AccountLike[],
+  providerId: string,
+  connectionId?: string | null,
+): SourceAccountSummary {
   let count = 0;
   let valueEur = 0;
   let foreignCount = 0;
   for (const account of accounts) {
     if (account.providerId !== providerId) continue;
+    if (connectionId !== undefined && connectionId !== null && account.connectionId !== connectionId) continue;
     count += 1;
     if (account.valueCurrency.toUpperCase() === 'EUR') valueEur += account.value;
     else foreignCount += 1;

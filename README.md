@@ -50,8 +50,15 @@ et liquidités, réunis dans une seule vue.
 | **DEGIRO** | Import de fichier (export `Account.csv`) | Fiable. Entêtes FR et EN gérés (`Date,Heure,Date de,Produit,Code ISIN,…,ID Ordre`) et l'`ID Ordre` sert d'identifiant d'idempotence. L'API privée n'est utilisée que si vous la configurez, et elle est isolée |
 | **Trade Republic** | Import de fichier (export CSV officiel) | Fiable. Format officiel à 23 colonnes (`transaction_id` en UUID utilisé pour l'idempotence). L'API non officielle est isolée ; l'authentification exige un code ou une approbation dans l'application |
 | **Crédit Agricole / CA Bourse** | Import de fichier + connecteur web | Export du site recommandé (robuste aux refontes). **Les positions et ISIN ne sont pas récupérables** par les modules publics : saisie manuelle ou import de positions |
-| **Revolut** | Import du relevé (PDF ou Excel selon la devise) | L'API Open Banking/PSD2 exige un certificat eIDAS et un agrément AISP : **impossible pour un particulier**, donc non contournée. Le connecteur sait aussi ingérer un CSV si vous convertissez le relevé |
+| **Revolut** | Import du relevé (PDF ou Excel selon la devise) | Ou, mieux, via **Banques (open banking)** ci-dessous. Le connecteur sait aussi ingérer un CSV si vous convertissez le relevé |
+| **Banques (open banking)** | API officielle PSD2 via Enable Banking | Crédit Agricole, Revolut, Boursorama, BNP… (2 500+ banques européennes). Soldes et opérations en lecture seule, gratuit pour **vos propres comptes** (« production restreinte »). Accord renouvelé tous les 180 jours maximum |
 | **MetaMask / wallets EVM** | Adresse publique | Aucune connexion permanente requise, aucun secret demandé. 7 chaînes fonctionnent sans clé (nœuds RPC et Blockscout vérifiés) ; Etherscan palier gratuit seulement sur Ethereum, Arbitrum et Polygon |
+| **Bitcoin** | Adresses et/ou clé publique étendue (xpub, ypub, zpub) | Ledger, Trezor, Sparrow, Electrum… Toutes les adresses du compte sont retrouvées (BIP44/49/84). Clés privées et phrases de récupération **refusées**. Soldes lus sur mempool.space (repli blockstream.info) |
+| **Solana** | Adresse publique | Phantom, Solflare, Backpack… SOL + jetons SPL. Les jetons inconnus sans cotation (spam fréquent) sont écartés |
+| **Binance, Kraken, Coinbase, Bitpanda** | Clé d'API **en lecture seule** | Soldes (spot, épargne, staking selon la plateforme) + euros disponibles. Créez une clé sans droit de retrait ni de trading |
+
+Plusieurs connexions d'une même source sont possibles (plusieurs wallets Bitcoin, deux comptes
+Binance…) : bouton « Ajouter » dans la section correspondante de **Connexions**.
 
 Chaque connecteur déclare honnêtement ses capacités : l'interface indique « Import de fichiers
 uniquement » quand aucune API exploitable n'existe, plutôt que de laisser croire le contraire.
@@ -131,6 +138,34 @@ une validation dans son application mobile à la première synchronisation ; la 
 validée est conservée dans le volume de données (`/data/home`) et survit aux mises à jour.
 Détails : `docs/connectors/sidecars.md`.
 
+### Relier une banque (Enable Banking, gratuit pour vos comptes)
+
+1. Créez un compte sur <https://enablebanking.com/cp/>, puis **API applications → Register
+   new application** en environnement **Production** ; choisissez « Generate in the browser »
+   pour obtenir la clé privée (fichier `.pem`).
+2. Adresse de retour (*redirect URL*) à déclarer : celle affichée dans **Connexions → Ajouter
+   une banque**, soit `https://votre-adresse/connexions/banque`. Pour la fixer indépendamment de
+   l'adresse du moment, renseignez `SUIVIINVEST_ENABLEBANKING_REDIRECT_URL` (ou `SUIVIINVEST_PUBLIC_URL`).
+3. Dans le tableau de bord Enable Banking, **Link accounts** : liez vos propres comptes. C'est
+   ce qui active gratuitement la « production restreinte » (accès limité à vos comptes).
+4. Dans SuiviInvest, collez l'identifiant de l'application et la clé privée (vérifiés, puis
+   chiffrés), choisissez votre banque et validez chez elle. Les comptes remontent aussitôt.
+
+Avec un tunnel `trycloudflare.com`, l'adresse change à chaque nouveau tunnel : mettez à jour
+l'adresse de retour chez Enable Banking, ou, si la page de retour ne s'ouvre pas, utilisez
+« Le retour de la banque n'a pas abouti ? » et collez l'adresse affichée par le navigateur.
+
+### Plateformes crypto : créer une clé en lecture seule
+
+| Plateforme | Où | Droits à cocher |
+| --- | --- | --- |
+| Binance | Profil → Gestion des API → Créer une API (clé système) | « Activer la lecture » **seulement** |
+| Kraken | Paramètres → API → Créer une clé | « Query Funds » (+ « Query Ledger Entries » facultatif) |
+| Coinbase | portal.cdp.coinbase.com → Clés API (Secret API Key, ECDSA ou Ed25519) | « View » uniquement |
+| Bitpanda | Paramètres → Clé API | « Lire » (Read) uniquement |
+
+Aucune de ces clés ne permet de trader ou de retirer si vous ne cochez que la lecture.
+
 Aucune clé n'est obligatoire pour les wallets EVM : les nœuds publics et les explorateurs
 Blockscout répondent sans clé. Une clé (Etherscan, Alchemy) améliore la fiabilité de l'historique.
 
@@ -140,6 +175,10 @@ Blockscout répondent sans clé. Une clé (Etherscan, Alchemy) améliore la fiab
 
 Par honnêteté, et parce qu'il vaut mieux le savoir avant de compter sur une source :
 
+- Bitcoin (adresse et zpub) et Solana ont été testés contre les explorateurs publics réels.
+  Enable Banking, Binance, Kraken, Coinbase et Bitpanda sont implémentés d'après leur
+  documentation officielle (signatures vérifiées sur les vecteurs publiés) et testés hors ligne ;
+  le premier branchement réel se fait avec vos identifiants.
 - Les accès **réels** à DEGIRO, Trade Republic, Crédit Agricole et Revolut n'ont pas pu être
   testés (aucun identifiant personnel disponible). Le code, les interfaces, les formats et les
   cas d'erreur sont couverts par des tests **hors ligne** sur fixtures ; les appels aux services

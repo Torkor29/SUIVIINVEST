@@ -113,18 +113,33 @@ async function addressStats(ctx: ConnectorContext, address: string): Promise<{ s
   );
 }
 
-/** Parcourt les adresses d'une clé étendue jusqu'à 20 adresses vierges consécutives (norme BIP44). */
+/** Nombre d'adresses interrogées en parallèle (l'explorateur public tolère ce rythme). */
+const SCAN_BATCH = 10;
+
+/**
+ * Parcourt les adresses d'une clé étendue jusqu'à 20 adresses vierges
+ * consécutives (norme BIP44), par lots interrogés en parallèle. Les deux
+ * branches (réception, monnaie rendue) sont parcourues en même temps.
+ */
 async function scanExtendedKey(ctx: ConnectorContext, extendedKey: string): Promise<number> {
-  let total = 0;
-  for (const change of [0, 1] as const) {
+  const scanBranch = async (change: 0 | 1): Promise<number> => {
+    let total = 0;
     let unused = 0;
-    for (let index = 0; index < MAX_ADDRESSES_PER_CHAIN && unused < GAP_LIMIT; index++) {
-      const { sats, used } = await addressStats(ctx, deriveAddress(extendedKey, change, index));
-      total += sats;
-      unused = used ? 0 : unused + 1;
+    for (let start = 0; start < MAX_ADDRESSES_PER_CHAIN && unused < GAP_LIMIT; start += SCAN_BATCH) {
+      const indexes = Array.from({ length: SCAN_BATCH }, (_, offset) => start + offset);
+      const results = await Promise.all(
+        indexes.map((index) => addressStats(ctx, deriveAddress(extendedKey, change, index))),
+      );
+      for (const result of results) {
+        if (unused >= GAP_LIMIT) break;
+        total += result.sats;
+        unused = result.used ? 0 : unused + 1;
+      }
     }
-  }
-  return total;
+    return total;
+  };
+  const [receive, change] = await Promise.all([scanBranch(0), scanBranch(1)]);
+  return receive + change;
 }
 
 function configValue(ctx: ConnectorContext): string {

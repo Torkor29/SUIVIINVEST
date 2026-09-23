@@ -28,6 +28,11 @@ export interface ConnectionCardProps {
   readonly requiredConfig: readonly string[];
   readonly onChanged: () => void;
   readonly onShowRuns: (connectionId: string) => void;
+  /** Identifiant de test de la carte (plusieurs cartes par source possibles). */
+  readonly testId?: string;
+  /** Carte vide ouverte directement sur le formulaire (bouton « Ajouter »). */
+  readonly startOpen?: boolean;
+  readonly onCancelNew?: () => void;
 }
 
 /**
@@ -40,7 +45,7 @@ interface CredentialField {
   readonly key: string;
   readonly label: string;
   readonly kind: 'secret' | 'config';
-  readonly type?: 'text' | 'password' | 'tel';
+  readonly type?: 'text' | 'password' | 'tel' | 'textarea';
   readonly optional?: boolean;
   readonly hint?: string;
   readonly placeholder?: string;
@@ -77,7 +82,69 @@ const CREDENTIAL_FIELDS: Readonly<Record<string, readonly CredentialField[]>> = 
     },
     { key: 'trade_republic_pin', label: 'Code PIN', kind: 'secret', type: 'password', placeholder: '••••' },
   ],
+  bitcoin: [
+    {
+      key: 'addresses',
+      label: 'Adresses ou clé publique étendue',
+      kind: 'config',
+      type: 'textarea',
+      placeholder: 'zpub6r… ou bc1q…, 3…, 1… (séparées par des virgules)',
+      hint: 'Ledger Live : Compte → ⋯ → Modifier le compte → Avancé → xpub. Jamais de clé privée ni de phrase de récupération.',
+    },
+  ],
+  solana: [
+    { key: 'address', label: 'Adresse publique Solana', kind: 'config', placeholder: 'Ex. 7xKXtg2CW87d…' },
+  ],
+  binance: [
+    { key: 'binance_api_key', label: 'Clé API', kind: 'secret', type: 'text' },
+    {
+      key: 'binance_api_secret',
+      label: 'Clé secrète',
+      kind: 'secret',
+      type: 'password',
+      hint: 'Binance → Gestion des API → créez une clé en « Lecture seule » (ne cochez ni trading ni retrait).',
+    },
+  ],
+  kraken: [
+    { key: 'kraken_api_key', label: 'Clé API', kind: 'secret', type: 'text' },
+    {
+      key: 'kraken_api_secret',
+      label: 'Clé privée',
+      kind: 'secret',
+      type: 'password',
+      hint: 'Kraken → Paramètres → API : cochez uniquement « Query Funds ».',
+    },
+  ],
+  coinbase: [
+    {
+      key: 'coinbase_api_key_name',
+      label: 'Nom de la clé API',
+      kind: 'secret',
+      type: 'text',
+      placeholder: 'organizations/…/apiKeys/…',
+    },
+    {
+      key: 'coinbase_api_private_key',
+      label: 'Clé privée',
+      kind: 'secret',
+      type: 'textarea',
+      placeholder: '-----BEGIN EC PRIVATE KEY----- …',
+      hint: 'Coinbase Developer Platform → clés API → permission « View » uniquement.',
+    },
+  ],
+  bitpanda: [
+    {
+      key: 'bitpanda_api_key',
+      label: 'Clé API',
+      kind: 'secret',
+      type: 'password',
+      hint: 'Bitpanda → Profil → Clé API : cochez seulement « Lecture » (Balance, Transaction).',
+    },
+  ],
 };
+
+/** Sources dont la configuration est entièrement décrite par CREDENTIAL_FIELDS. */
+const FIELDS_ONLY: ReadonlySet<string> = new Set(['bitcoin', 'solana', 'binance', 'kraken', 'coinbase', 'bitpanda', 'enable_banking']);
 
 /** Libellés des paramètres non secrets attendus par les connecteurs. */
 const CONFIG_LABELS: Readonly<Record<string, string>> = {
@@ -108,12 +175,16 @@ export function ConnectionCard({
   requiredConfig,
   onChanged,
   onShowRuns,
+  testId,
+  startOpen = false,
+  onCancelNew,
 }: ConnectionCardProps) {
   const test = useAction();
   const sync = useAction();
   const remove = useAction();
   const connect = useAction();
-  const [showConnect, setShowConnect] = useState(false);
+  const [showConnect, setShowConnect] = useState(startOpen);
+  const renew = useAction();
   const [showImport, setShowImport] = useState(false);
   const [label, setLabel] = useState(source.providerName);
   const [config, setConfig] = useState<Record<string, string>>({});
@@ -130,8 +201,9 @@ export function ConnectionCard({
   const state = sourceStateOf(connection);
   const connected = isConnected(connection);
   const needsReconnect = connection !== null && (connection.needsReauth || state.key === 'AUTH_REQUIRED');
-  const configKeys =
-    source.providerId === 'metamask' && !requiredConfig.includes('address')
+  const configKeys = FIELDS_ONLY.has(source.providerId)
+    ? []
+    : source.providerId === 'metamask' && !requiredConfig.includes('address')
       ? [...requiredConfig, 'address']
       : [...requiredConfig];
   const canImport = (connection?.importFormats.length ?? 0) > 0 || source.providerId === 'trade_republic';
@@ -207,10 +279,14 @@ export function ConnectionCard({
   };
 
   return (
-    <div data-testid={`connection-card-${source.providerId}`} className="conn-card-wrap">
+    <div data-testid={testId ?? `connection-card-${source.providerId}`} className="conn-card-wrap">
       <Card
         title={source.providerName}
-        subtitle={connection === null ? 'Aucune connexion enregistrée pour cette source.' : connection.label}
+        subtitle={
+          connection === null
+            ? (source.description ?? 'Aucune connexion enregistrée pour cette source.')
+            : connection.label
+        }
         actions={
           <span className="chips">
             <Badge tone={connected ? 'ok' : 'neutral'}>{connected ? 'Connecté' : 'Non connecté'}</Badge>
@@ -315,6 +391,7 @@ export function ConnectionCard({
         )}
         <ActionFeedback state={remove} />
         <ActionFeedback state={connect} />
+        <ActionFeedback state={renew} />
 
         {showConnect && (
           <div className="conn-form" data-testid="connection-connect-form">
@@ -343,19 +420,37 @@ export function ConnectionCard({
             {credentialFields.map((field) => (
               <label className="field" key={field.key}>
                 <span className="field-label">{field.label}</span>
-                <input
-                  className="input"
-                  data-testid={`connection-credential-${field.key}`}
-                  type={field.type ?? 'text'}
-                  autoComplete={field.type === 'password' ? 'new-password' : 'off'}
-                  placeholder={field.placeholder}
-                  value={(field.kind === 'secret' ? secretValues[field.key] : config[field.key]) ?? ''}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (field.kind === 'secret') setSecretValues((current) => ({ ...current, [field.key]: value }));
-                    else setConfig((current) => ({ ...current, [field.key]: value }));
-                  }}
-                />
+                {field.type === 'textarea' ? (
+                  <textarea
+                    className="input textarea"
+                    data-testid={`connection-credential-${field.key}`}
+                    rows={3}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder={field.placeholder}
+                    value={(field.kind === 'secret' ? secretValues[field.key] : config[field.key]) ?? ''}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (field.kind === 'secret') setSecretValues((current) => ({ ...current, [field.key]: value }));
+                      else setConfig((current) => ({ ...current, [field.key]: value }));
+                    }}
+                  />
+                ) : (
+                  <input
+                    className="input"
+                    data-testid={`connection-credential-${field.key}`}
+                    type={field.type ?? 'text'}
+                    autoComplete={field.type === 'password' ? 'new-password' : 'off'}
+                    spellCheck={false}
+                    placeholder={field.placeholder}
+                    value={(field.kind === 'secret' ? secretValues[field.key] : config[field.key]) ?? ''}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (field.kind === 'secret') setSecretValues((current) => ({ ...current, [field.key]: value }));
+                      else setConfig((current) => ({ ...current, [field.key]: value }));
+                    }}
+                  />
+                )}
                 {field.hint !== undefined && <span className="field-hint">{field.hint}</span>}
               </label>
             ))}
@@ -381,7 +476,14 @@ export function ConnectionCard({
               >
                 {connect.pending ? 'Enregistrement…' : 'Enregistrer la connexion'}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setShowConnect(false)}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setShowConnect(false);
+                  onCancelNew?.();
+                }}
+              >
                 Annuler
               </button>
             </div>
@@ -433,7 +535,31 @@ export function ConnectionCard({
         </div>
         {connection !== null && (
           <div className="conn-links">
-            {(needsReconnect || credentialFields.length > 0) && (
+            {source.providerId === 'enable_banking' && (
+              <button
+                type="button"
+                className="btn btn-link"
+                data-testid="connection-renew"
+                disabled={renew.pending}
+                onClick={() =>
+                  void renew.run(async () => {
+                    const result = await request<{ url: string }>('/api/enable-banking/authorize', {
+                      method: 'POST',
+                      json: {
+                        aspspName: connection.config.aspsp_name ?? connection.label,
+                        country: connection.config.aspsp_country ?? 'FR',
+                        connectionId: connection.id,
+                      },
+                    });
+                    window.location.assign(result.url);
+                    return 'Redirection vers votre banque…';
+                  })
+                }
+              >
+                {renew.pending ? 'Redirection…' : 'Renouveler l’autorisation'}
+              </button>
+            )}
+            {source.providerId !== 'enable_banking' && (needsReconnect || credentialFields.length > 0) && (
               <button
                 type="button"
                 className="btn btn-link"

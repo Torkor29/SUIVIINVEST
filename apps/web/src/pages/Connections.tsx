@@ -21,7 +21,14 @@ import { SyncRunsTable } from '../components/connections/SyncRunsTable.tsx';
 import { ImportPanel } from '../components/connections/ImportPanel.tsx';
 import { SyncAllSummary } from '../components/connections/SyncAllSummary.tsx';
 import { WalletsPanel } from '../components/connections/WalletsPanel.tsx';
-import { SOURCE_ORDER, summarizeAccounts, type SourceDefinition } from '../lib/connections.ts';
+import { EnableBankingPanel } from '../components/connections/EnableBankingPanel.tsx';
+import {
+  SOURCE_CATALOG,
+  SOURCE_GROUPS,
+  SOURCE_ORDER,
+  summarizeAccounts,
+  type SourceDefinition,
+} from '../lib/connections.ts';
 
 type ProviderInfo = ConnectionsResponse['providers'][number];
 
@@ -29,6 +36,8 @@ type ProviderInfo = ConnectionsResponse['providers'][number];
 export function ConnectionsPage() {
   const [runsFor, setRunsFor] = useState<string | null>(null);
   const [syncAllResult, setSyncAllResult] = useState<SyncAllResponse | null>(null);
+  /** Sources à connexions multiples pour lesquelles un formulaire d'ajout est ouvert. */
+  const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
   const state = useAsync<ConnectionsResponse>((signal) => request<ConnectionsResponse>('/api/connections', { signal }), []);
   const accounts = useAsync<AccountsResponse>((signal) => request<AccountsResponse>('/api/accounts', { signal }), []);
   const runs = useAsync<readonly SyncRunDto[]>(
@@ -70,14 +79,11 @@ export function ConnectionsPage() {
     { key: 'formats', header: 'Formats', render: (row) => <span className="muted small">{row.importFormats.length === 0 ? '—' : row.importFormats.join(', ')}</span> },
   ];
 
-  const sources: readonly SourceDefinition[] = state.data === null
-    ? SOURCE_ORDER
-    : [
-        ...SOURCE_ORDER,
-        ...state.data.connections
-          .filter((connection) => !SOURCE_ORDER.some((source) => source.providerId === connection.providerId))
-          .map((connection) => ({ providerId: connection.providerId, providerName: connection.providerName })),
-      ];
+  // Toutes les sources connues (catalogue + historiques) : noms lisibles pour les résumés.
+  const sources: readonly SourceDefinition[] = [
+    ...SOURCE_CATALOG,
+    ...SOURCE_ORDER.filter((source) => !SOURCE_CATALOG.some((item) => item.providerId === source.providerId)),
+  ];
 
   const runSyncAll = (): void => {
     setSyncAllResult(null);
@@ -142,27 +148,102 @@ export function ConnectionsPage() {
               <StatTile label="Prochaine synchro" value={data.scheduler.nextRunAt === null ? '—' : formatDate(data.scheduler.nextRunAt)} hint={`Dernière : ${formatDate(data.scheduler.lastRunAt)}`} />
             </Grid>
 
-            <div className="conn-grid">
-              {sources.map((source) => {
-                const connection = data.connections.find((item) => item.providerId === source.providerId) ?? null;
-                const provider = data.providers.find((item) => item.providerId === source.providerId);
-                const summary = summarizeAccounts(accounts.data?.accounts ?? [], source.providerId);
-                return (
-                  <ConnectionCard
-                    key={source.providerId}
-                    source={source}
-                    connection={connection}
-                    accounts={summary}
-                    requiredConfig={provider?.requiredConfig ?? []}
-                    onChanged={() => {
-                      state.reload();
-                      accounts.reload();
-                    }}
-                    onShowRuns={setRunsFor}
-                  />
-                );
-              })}
-            </div>
+            {SOURCE_GROUPS.map((group) => {
+              // Sources proposées par ce serveur (une build de test peut en avoir moins).
+              const groupSources = SOURCE_CATALOG.filter(
+                (source) =>
+                  source.group === group.id && data.providers.some((provider) => provider.providerId === source.providerId),
+              );
+              if (groupSources.length === 0) return null;
+              const reload = (): void => {
+                state.reload();
+                accounts.reload();
+              };
+              return (
+                <section key={group.id} className="conn-group" data-testid={`connections-group-${group.id}`}>
+                  <header className="conn-group-head">
+                    <h2 className="section-title">{group.title}</h2>
+                    <p className="muted">{group.subtitle}</p>
+                  </header>
+                  <div className="conn-grid">
+                    {groupSources.flatMap((source) => {
+                      const provider = data.providers.find((item) => item.providerId === source.providerId);
+                      const requiredConfig = provider?.requiredConfig ?? [];
+                      const existing = data.connections.filter((item) => item.providerId === source.providerId);
+                      const card = (connection: (typeof existing)[number] | null, testId: string, extra?: { startOpen?: boolean; onCancelNew?: () => void }) => (
+                        <ConnectionCard
+                          key={connection?.id ?? `${source.providerId}-new`}
+                          source={source}
+                          connection={connection}
+                          accounts={summarizeAccounts(accounts.data?.accounts ?? [], source.providerId, connection?.id ?? null)}
+                          requiredConfig={requiredConfig}
+                          onChanged={() => {
+                            setAdding((current) => {
+                              const next = new Set(current);
+                              next.delete(source.providerId);
+                              return next;
+                            });
+                            reload();
+                          }}
+                          onShowRuns={setRunsFor}
+                          testId={testId}
+                          {...(extra?.startOpen ? { startOpen: true } : {})}
+                          {...(extra?.onCancelNew ? { onCancelNew: extra.onCancelNew } : {})}
+                        />
+                      );
+
+                      if (source.providerId === 'enable_banking') {
+                        return [
+                          ...existing.map((connection, index) =>
+                            card(connection, index === 0 ? 'connection-card-enable_banking' : `connection-card-enable_banking-${index}`),
+                          ),
+                          <EnableBankingPanel key="enable-banking-panel" onChanged={reload} />,
+                        ];
+                      }
+                      if (!source.multiple) {
+                        return [card(existing[0] ?? null, `connection-card-${source.providerId}`)];
+                      }
+                      if (existing.length === 0) return [card(null, `connection-card-${source.providerId}`)];
+                      const cards = existing.map((connection, index) =>
+                        card(connection, index === 0 ? `connection-card-${source.providerId}` : `connection-card-${source.providerId}-${index}`),
+                      );
+                      if (adding.has(source.providerId)) {
+                        cards.push(
+                          card(null, `connection-add-card-${source.providerId}`, {
+                            startOpen: true,
+                            onCancelNew: () =>
+                              setAdding((current) => {
+                                const next = new Set(current);
+                                next.delete(source.providerId);
+                                return next;
+                              }),
+                          }),
+                        );
+                      } else {
+                        cards.push(
+                          <button
+                            key={`${source.providerId}-add`}
+                            type="button"
+                            className="conn-add-tile"
+                            data-testid={`connection-add-${source.providerId}`}
+                            onClick={() => setAdding((current) => new Set(current).add(source.providerId))}
+                          >
+                            <span className="conn-add-plus" aria-hidden="true">
+                              +
+                            </span>
+                            <span>
+                              <strong>Ajouter : {source.providerName}</strong>
+                              <small>{source.description}</small>
+                            </span>
+                          </button>,
+                        );
+                      }
+                      return cards;
+                    })}
+                  </div>
+                </section>
+              );
+            })}
 
             {runsFor !== null && (
               <SyncRunsTable

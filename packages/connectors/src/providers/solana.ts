@@ -136,7 +136,13 @@ export const solanaConnector = createBalanceConnector({
     }
 
     const prices = await splPricesEur(ctx, unknown.map((token) => token.mint));
-    for (const token of unknown) {
+    // Jetons inconnus et sans cotation : sur Solana, presque toujours des envois
+    // non sollicités (spam). Ils sont écartés, et leur nombre est signalé.
+    const unpriced = unknown.filter((token) => !prices.has(token.mint));
+    if (unpriced.length > 0) {
+      ctx.logger.warn(`${unpriced.length} jeton(s) Solana inconnu(s) et sans cotation ignoré(s) (souvent des envois non sollicités).`);
+    }
+    for (const token of unknown.filter((item) => prices.has(item.mint))) {
       holdings.push({
         symbol: `SPL-${token.mint.slice(0, 4)}`,
         name: `Jeton Solana ${token.mint.slice(0, 4)}…${token.mint.slice(-4)}`,

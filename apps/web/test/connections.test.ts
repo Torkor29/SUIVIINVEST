@@ -241,3 +241,26 @@ test('SOURCE_ORDER couvre les cinq sources demandées dans l’ordre', () => {
     'Revolut',
   ]);
 });
+
+test('catalogue : chaque source appartient à une catégorie, sans doublon', async () => {
+  const { SOURCE_CATALOG, SOURCE_GROUPS } = await import('../src/lib/connections.ts');
+  const ids = SOURCE_CATALOG.map((source) => source.providerId);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const source of SOURCE_CATALOG) {
+    assert.ok(SOURCE_GROUPS.some((group) => group.id === source.group), source.providerId);
+    assert.ok((source.description ?? '').length > 10, source.providerId);
+  }
+  for (const id of ['enable_banking', 'bitcoin', 'solana', 'binance', 'kraken', 'coinbase', 'bitpanda']) {
+    assert.ok(ids.includes(id), id);
+  }
+});
+
+test('summarizeAccounts : filtre par connexion quand plusieurs wallets coexistent', async () => {
+  const accounts = [
+    { providerId: 'bitcoin', connectionId: 'a', value: 100, valueCurrency: 'EUR' },
+    { providerId: 'bitcoin', connectionId: 'b', value: 50, valueCurrency: 'EUR' },
+  ];
+  const { summarizeAccounts: summarize } = await import('../src/lib/connections.ts');
+  assert.equal(summarize(accounts, 'bitcoin').valueEur, 150);
+  assert.equal(summarize(accounts, 'bitcoin', 'b').valueEur, 50);
+});

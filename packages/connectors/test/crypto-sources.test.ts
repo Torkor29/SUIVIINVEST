@@ -86,12 +86,12 @@ test('Bitcoin : une zpub parcourt ses adresses (limite de 20 vierges) et valoris
   assert.equal(positions[0]?.symbol, 'BTC');
   assert.ok(Math.abs((positions[0]?.quantity ?? 0) - 0.85) < 1e-12);
   assert.ok(Math.abs((positions[0]?.unitPrice ?? 0) - 100_000) < 1e-6);
-  // 3 adresses de réception + 20 vierges ; 1 de monnaie + 20 vierges.
+  // Lots de 10 : réception 0-29 (3 utilisées + 20 vierges → 30 appels) ; monnaie 0-29 (idem).
   const explorerCalls = http.requests.filter((request) => request.url.includes('mempool.space')).length;
-  assert.equal(explorerCalls, 23 + 21);
+  assert.equal(explorerCalls, 30 + 30);
 });
 
-test('Solana : SOL natif et jetons SPL, jetons inconnus gardés sans prix inventé', async () => {
+test('Solana : SOL natif et jetons SPL ; jetons inconnus sans cotation (spam) écartés', async () => {
   const address = 'vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg';
   const { ctx } = makeTestContext({
     config: { address },
@@ -132,10 +132,8 @@ test('Solana : SOL natif et jetons SPL, jetons inconnus gardés sans prix invent
   assert.equal(bySymbol.SOL?.unitPrice, 100);
   assert.equal(bySymbol.USDC?.quantity, 108);
   assert.ok(Math.abs((bySymbol.USDC?.unitPrice ?? 0) - 1 / 1.08) < 1e-12);
-  const unknown = positions.find((position) => position.contractAddress === 'Inconnu1111111111111111111111111111111111');
-  assert.equal(unknown?.quantity, 42);
-  assert.equal(unknown?.unitPrice, null);
-  assert.equal(positions.length, 3);
+  assert.equal(positions.find((position) => position.contractAddress === 'Inconnu1111111111111111111111111111111111'), undefined);
+  assert.equal(positions.length, 2);
 });
 
 test('Kraken : signature conforme à la documentation officielle et codes d’actifs normalisés', () => {

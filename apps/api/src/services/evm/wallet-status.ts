@@ -21,6 +21,9 @@ import { ActivityRepository, toDomainActivity } from '../../repositories/activit
 import { ConnectionRepository } from '../../repositories/connections.ts';
 import { MarketRepository } from '../../repositories/market.ts';
 
+/** Sources crypto qui ne sont pas des adresses EVM : elles ont leur propre carte de connexion. */
+const NON_EVM_PROVIDERS: ReadonlySet<string> = new Set(['bitcoin', 'solana', 'binance', 'kraken', 'coinbase', 'bitpanda']);
+
 interface ChainSyncStateRow {
   connection_id: string;
   chain: string;
@@ -95,14 +98,14 @@ export class WalletStatusService {
   list(): WalletStatusDto[] {
     return this.#accounts
       .list()
-      .filter((account) => account.type === 'CRYPTO')
+      .filter((account) => account.type === 'CRYPTO' && !NON_EVM_PROVIDERS.has(account.provider_id))
       .map((account) => this.#build(account))
       .sort((a, b) => b.valueEur - a.valueEur);
   }
 
   forAccount(accountId: string): WalletStatusDto | null {
     const account = this.#accounts.get(accountId);
-    if (!account || account.type !== 'CRYPTO') return null;
+    if (!account || account.type !== 'CRYPTO' || NON_EVM_PROVIDERS.has(account.provider_id)) return null;
     return this.#build(account);
   }
 

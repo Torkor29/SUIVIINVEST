@@ -257,6 +257,8 @@ export interface AccountSummary {
   readonly lastActivityDate: string | null;
   readonly isActive: boolean;
   readonly externalAccountId: string | null;
+  /** Connexion d'origine (plusieurs connexions possibles par source). */
+  readonly connectionId?: string | null;
 }
 
 export interface AccountsResponse {
