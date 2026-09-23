@@ -64,7 +64,8 @@ const loginSchema = z.object({
 
 const createAccountSchema = z.object({
   username: usernameSchema,
-  password: passwordSchema,
+  /** Absent : la personne invitée se connectera avec Google (e-mail obligatoire). */
+  password: passwordSchema.optional().nullable(),
   displayName: z.string().max(80).optional().nullable(),
   role: z.enum(['OWNER', 'MEMBER']).optional(),
   email: emailSchema.optional().nullable(),
@@ -72,7 +73,8 @@ const createAccountSchema = z.object({
 });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1).max(200),
+  // Vide pour un compte créé via Google qui définit son premier mot de passe.
+  currentPassword: z.string().max(200).default(''),
   newPassword: passwordSchema,
 });
 
@@ -544,7 +546,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
       const created = await deps.auth.createAccount(
         {
           username: parsed.data.username,
-          password: parsed.data.password,
+          password: parsed.data.password ?? null,
           displayName: parsed.data.displayName ?? null,
           role: parsed.data.role,
           email: parsed.data.email ?? null,

@@ -110,6 +110,8 @@ export interface TestAppOptions {
   readonly env?: Record<string, string>;
   readonly mailer?: Mailer;
   readonly connectorHttp?: Parameters<typeof buildApp>[0]['connectorHttp'];
+  /** Google simulé (connexion avec Google). */
+  readonly googleFetch?: typeof fetch;
   /** Réseau des cours (portefeuille saisi à la main) ; par défaut : aucun accès. */
   readonly marketFetch?: typeof fetch;
   readonly now?: () => Date;
@@ -146,6 +148,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
         throw new Error('Réseau désactivé en test');
       }),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.googleFetch ? { googleFetch: options.googleFetch } : {}),
     providers: options.providers ?? [
       new StaticPriceProvider({
         quotes: { unset: [] },

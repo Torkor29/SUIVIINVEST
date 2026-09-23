@@ -32,6 +32,8 @@ import { HoldingsService } from './services/holdings.ts';
 import { MarketClient } from './services/market-client.ts';
 import { createE2eMarketFetch } from './testing/e2e-market.ts';
 import { registerHoldingsRoutes } from './routes/holdings.ts';
+import { registerGoogleAuthRoutes } from './routes/google-auth.ts';
+import { GoogleAuth } from './security/google.ts';
 import { PortfolioService } from './services/portfolio.ts';
 import { RealEstateService } from './services/realestate.ts';
 import { SyncService } from './services/sync.ts';
@@ -70,6 +72,8 @@ export interface AppDeps {
   readonly mailer?: Mailer;
   /** Client HTTP des routes Enable Banking et des connecteurs (tests : réponses simulées). */
   readonly connectorHttp?: HttpClient;
+  /** `fetch` de la connexion Google (tests : Google simulé). */
+  readonly googleFetch?: typeof fetch;
   /** `fetch` des cours du portefeuille saisi à la main (tests : réponses simulées). */
   readonly marketFetch?: typeof fetch;
   readonly schedulerState?: { current: { isRunning: () => boolean; nextRun: () => string | null; lastRun: () => string | null } | null };
@@ -263,6 +267,20 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   /* ----------------------------------------------------------------- routes */
 
   await registerAuthRoutes(app, { auth, audit, mailer, publicUrl: config.publicUrl, logger });
+  // Connexion avec Google (proposée dès que l'application Google est configurée).
+  await registerGoogleAuthRoutes(app, {
+    auth,
+    audit,
+    google: new GoogleAuth({
+      db,
+      secrets,
+      env: { clientId: config.googleClientId, clientSecret: config.googleClientSecret },
+      ...(deps.googleFetch ? { fetchImpl: deps.googleFetch } : {}),
+    }),
+    publicUrl: config.publicUrl,
+    trustProxy: config.trustProxy,
+    cookieSecure: config.cookieSecure,
+  });
   await registerWealthRoutes(app, { db, portfolio, crypto, realEstate, properties });
   // Saisie manuelle : indispensable pour les sources qui ne fournissent pas les
   // positions (Crédit Agricole) — l'utilisateur complète ce que l'API ne donne pas.

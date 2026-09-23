@@ -455,6 +455,32 @@ CREATE TABLE dca_plans (
 CREATE INDEX idx_dca_plans_instrument ON dca_plans(instrument_id);
 `;
 
+/**
+ * Version 9 — connexion avec Google.
+ *
+ *  - `users.google_sub` : identifiant Google (stable, non réaffecté) du compte lié ;
+ *  - `users.password_set` : 0 pour un compte créé via Google sans mot de passe
+ *    (son empreinte est alors celle d'un secret aléatoire jamais divulgué) ;
+ *  - `oauth_states` : demandes de connexion en cours. Seules des EMPREINTES sont
+ *    stockées ; une demande sert une fois et expire en 10 minutes.
+ */
+const GOOGLE_SIGN_IN_V9 = `
+ALTER TABLE users ADD COLUMN google_sub TEXT;
+ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1;
+CREATE UNIQUE INDEX idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL;
+
+CREATE TABLE oauth_states (
+  state_hash    TEXT PRIMARY KEY,
+  browser_hash  TEXT NOT NULL,
+  nonce         TEXT NOT NULL,
+  code_verifier TEXT NOT NULL,
+  mode          TEXT NOT NULL CHECK (mode IN ('login','link')),
+  user_id       TEXT,
+  redirect_uri  TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
@@ -464,4 +490,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 6, name: 'accounts_and_recovery', statements: [ACCOUNTS_V6] },
   { version: 7, name: 'account_email_and_resets', statements: [ACCOUNT_EMAIL_V7] },
   { version: 8, name: 'manual_portfolio', statements: [MANUAL_PORTFOLIO_V8] },
+  { version: 9, name: 'google_sign_in', statements: [GOOGLE_SIGN_IN_V9] },
 ];

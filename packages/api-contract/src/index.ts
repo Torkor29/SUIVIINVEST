@@ -72,6 +72,23 @@ export interface ProfileResponse {
   readonly lastLoginAt: string | null;
   readonly passwordChangedAt: string | null;
   readonly hasRecoveryCode: boolean;
+  readonly googleLinked?: boolean;
+  readonly passwordSet?: boolean;
+}
+
+export interface GoogleStatusResponse {
+  readonly enabled: boolean;
+}
+
+export interface GoogleConfigResponse {
+  readonly configured: boolean;
+  /** « env » : réglé dans .env (non modifiable ici) ; « app » : réglé dans l'application. */
+  readonly source: 'env' | 'app' | null;
+  readonly clientId: string | null;
+  /** Adresse de retour à déclarer dans la console Google. */
+  readonly redirectUri: string;
+  /** Origine JavaScript autorisée à déclarer. */
+  readonly origin: string;
 }
 
 export interface UpdateProfileRequest {
@@ -146,6 +163,10 @@ export interface AccountSummaryDto {
   readonly hasRecoveryCode: boolean;
   /** true = une adresse e-mail (chiffrée) est enregistrée. */
   readonly hasEmail?: boolean;
+  /** Compte Google lié (connexion « Continuer avec Google »). */
+  readonly googleLinked?: boolean;
+  /** false = compte créé via Google, sans mot de passe. */
+  readonly passwordSet?: boolean;
 }
 
 export interface AccountListResponse {

@@ -52,6 +52,8 @@ export interface AccountRow {
   readonly created_at: string;
   readonly email_ciphertext: string | null;
   readonly email_index: string | null;
+  readonly google_sub?: string | null;
+  readonly password_set?: number;
 }
 
 /** Vue publique d'un compte : jamais de hachage, jamais de code. */
@@ -68,6 +70,10 @@ export interface AccountSummary {
   readonly hasRecoveryCode: boolean;
   /** true = une adresse e-mail (chiffrée) est enregistrée. */
   readonly hasEmail: boolean;
+  /** true = un compte Google est lié (connexion « Continuer avec Google »). */
+  readonly googleLinked: boolean;
+  /** false = compte créé via Google, sans mot de passe défini. */
+  readonly passwordSet: boolean;
 }
 
 /** Profil complet du titulaire (e-mail déchiffré pour lui seul). */
@@ -222,7 +228,8 @@ export class AuthService {
   async createAccount(
     input: {
       username: string;
-      password: string;
+      /** null = connexion avec Google uniquement (l'adresse e-mail est alors obligatoire). */
+      password: string | null;
       displayName?: string | null;
       role?: AccountRole;
       email?: string | null;
@@ -236,8 +243,12 @@ export class AuthService {
     const existing = this.#findByUsername(username);
     if (existing) throw new Error('Cet identifiant est déjà utilisé.');
     const email = this.#prepareEmail(input.email ?? null, null);
+    if (input.password === null && email === null) {
+      throw new Error('Sans mot de passe, indiquez l’adresse Google de la personne invitée.');
+    }
 
-    const passwordHash = await hashPassword(input.password);
+    // Sans mot de passe : empreinte d'un secret aléatoire jamais divulgué.
+    const passwordHash = await hashPassword(input.password ?? randomToken(32));
     const recoveryCode = generateRecoveryCode();
     const now = new Date().toISOString();
 
@@ -266,8 +277,8 @@ export class AuthService {
     const id = randomToken(12);
     this.#db.run(
       `INSERT INTO users (id, username, display_name, role, password_hash, recovery_hash,
-                          created_at, updated_at, password_changed_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          created_at, updated_at, password_changed_at, created_by, password_set)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       username,
       input.displayName ?? null,
@@ -276,8 +287,9 @@ export class AuthService {
       hashRecoveryCode(recoveryCode),
       now,
       now,
-      now,
+      input.password === null ? null : now,
       actor.userId,
+      input.password === null ? 0 : 1,
     );
     if (email !== null) this.#writeEmail(id, email);
     const created = this.#findById(id);
@@ -589,8 +601,12 @@ export class AuthService {
   > {
     const account = this.#findById(userId);
     if (!account) return { ok: false, reason: 'UNKNOWN_ACCOUNT' };
-    const valid = await verifyPassword(account.password_hash, currentPassword);
-    if (!valid) return { ok: false, reason: 'WRONG_PASSWORD' };
+    // Compte créé via Google : aucun mot de passe à vérifier, le premier se définit
+    // depuis une session ouverte.
+    if ((account.password_set ?? 1) === 1) {
+      const valid = await verifyPassword(account.password_hash, currentPassword);
+      if (!valid) return { ok: false, reason: 'WRONG_PASSWORD' };
+    }
     const recoveryCode = await this.#writePassword(userId, newPassword);
     return { ok: true, recoveryCode };
   }
@@ -637,6 +653,94 @@ export class AuthService {
     return { recoveryCode };
   }
 
+  /* ----------------------------------------------------------------- Google */
+
+  /**
+   * Connexion avec une identité Google VÉRIFIÉE (jeton signé par Google, e-mail
+   * confirmé). Le patrimoine étant commun à tous les comptes, l'inscription
+   * n'est pas libre :
+   *  1. compte déjà lié à ce compte Google -> connexion ;
+   *  2. compte existant avec cette adresse e-mail (ajoutée par son titulaire ou
+   *     invitée par le propriétaire) -> liaison puis connexion ;
+   *  3. aucune donnée encore (premier lancement) -> création du PROPRIÉTAIRE ;
+   *  4. sinon -> refus (« demandez une invitation »).
+   */
+  async googleSignIn(
+    identity: { sub: string; email: string; name: string | null },
+    meta: SessionMeta,
+  ): Promise<
+    | { outcome: 'LOGGED_IN' | 'CREATED_OWNER'; session: LoginSuccess }
+    | { outcome: 'DISABLED' | 'NOT_INVITED' | 'OTHER_GOOGLE_ACCOUNT' }
+  > {
+    const bySub = this.#db.get<AccountRow>('SELECT * FROM users WHERE google_sub = ?', identity.sub) ?? null;
+    if (bySub) {
+      if (bySub.disabled_at !== null) return { outcome: 'DISABLED' };
+      return { outcome: 'LOGGED_IN', session: this.#openSession(bySub, meta) };
+    }
+    const byEmail = this.#findByEmail(identity.email);
+    if (byEmail) {
+      if (byEmail.disabled_at !== null) return { outcome: 'DISABLED' };
+      if ((byEmail.google_sub ?? null) !== null) return { outcome: 'OTHER_GOOGLE_ACCOUNT' };
+      this.#db.run('UPDATE users SET google_sub = ?, updated_at = ? WHERE id = ?', identity.sub, new Date().toISOString(), byEmail.id);
+      return { outcome: 'LOGGED_IN', session: this.#openSession(byEmail, meta) };
+    }
+    if (this.needsSetup()) {
+      const now = new Date().toISOString();
+      this.#db.run(
+        `INSERT INTO users (id, username, display_name, role, password_hash, recovery_hash,
+                            created_at, updated_at, password_changed_at, last_login_at, google_sub, password_set)
+         VALUES ('owner', NULL, ?, 'OWNER', ?, ?, ?, ?, NULL, ?, ?, 0)`,
+        identity.name,
+        await hashPassword(randomToken(32)),
+        hashRecoveryCode(generateRecoveryCode()),
+        now,
+        now,
+        now,
+        identity.sub,
+      );
+      this.#writeEmail('owner', normalizeEmail(identity.email));
+      const owner = this.#findById('owner') as AccountRow;
+      return { outcome: 'CREATED_OWNER', session: this.#openSession(owner, meta) };
+    }
+    return { outcome: 'NOT_INVITED' };
+  }
+
+  /** Lie un compte Google au compte connecté (depuis le profil). */
+  linkGoogle(userId: string, identity: { sub: string; email: string }): AccountProfile {
+    const other = this.#db.get<AccountRow>('SELECT * FROM users WHERE google_sub = ?', identity.sub);
+    if (other && other.id !== userId) throw new Error('Ce compte Google est déjà lié à un autre compte SuiviInvest.');
+    const now = new Date().toISOString();
+    this.#db.run('UPDATE users SET google_sub = ?, updated_at = ? WHERE id = ?', identity.sub, now, userId);
+    const row = this.#findById(userId);
+    // Adresse e-mail reprise de Google si le compte n'en a pas encore (et qu'elle est libre).
+    if (row && row.email_index === null && !this.#findByEmail(identity.email)) {
+      this.#writeEmail(userId, normalizeEmail(identity.email));
+    }
+    return this.getProfile(userId) as AccountProfile;
+  }
+
+  unlinkGoogle(userId: string): AccountProfile {
+    const row = this.#findById(userId);
+    if (!row) throw new Error('Compte introuvable.');
+    if ((row.password_set ?? 1) === 0) {
+      throw new Error('Définissez d’abord un mot de passe : sans lui, vous ne pourriez plus vous connecter.');
+    }
+    this.#db.run('UPDATE users SET google_sub = NULL, updated_at = ? WHERE id = ?', new Date().toISOString(), userId);
+    return this.getProfile(userId) as AccountProfile;
+  }
+
+  #openSession(account: AccountRow, meta: SessionMeta): LoginSuccess {
+    const now = new Date().toISOString();
+    this.#db.run('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?', now, now, account.id);
+    const session = this.#createSession(account.id, meta);
+    return {
+      ...session,
+      userId: account.id,
+      username: account.username,
+      role: (account.role === 'OWNER' ? 'OWNER' : 'MEMBER') as AccountRole,
+    };
+  }
+
   /* ---------------------------------------------------------------- cookies */
 
   buildCookie(token: string): string {
@@ -664,7 +768,8 @@ export class AuthService {
     const recoveryCode = generateRecoveryCode();
     const now = new Date().toISOString();
     this.#db.run(
-      `UPDATE users SET password_hash = ?, password_changed_at = ?, recovery_hash = ?, updated_at = ?
+      `UPDATE users SET password_hash = ?, password_changed_at = ?, recovery_hash = ?, updated_at = ?,
+              password_set = 1
         WHERE id = ?`,
       passwordHash,
       now,
@@ -785,6 +890,8 @@ function toSummary(row: AccountRow): AccountSummary {
     passwordChangedAt: row.password_changed_at,
     hasRecoveryCode: row.recovery_hash !== null,
     hasEmail: row.email_index !== null,
+    googleLinked: (row.google_sub ?? null) !== null,
+    passwordSet: (row.password_set ?? 1) === 1,
   };
 }
 
