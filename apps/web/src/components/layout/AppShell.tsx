@@ -8,7 +8,7 @@ import { Topbar } from './Topbar.tsx';
 export function AppShell({ children }: { readonly children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
-  const { logout } = useAuth();
+  const { logout, session } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -24,7 +24,12 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
 
   return (
     <div className={menuOpen ? 'shell menu-open' : 'shell'}>
-      <Sidebar open={menuOpen} onNavigate={() => setMenuOpen(false)} />
+      <Sidebar
+        open={menuOpen}
+        onNavigate={() => setMenuOpen(false)}
+        onLogout={() => void logout()}
+        username={session?.username ?? null}
+      />
       {menuOpen && <button type="button" className="scrim" aria-label="Fermer le menu" onClick={() => setMenuOpen(false)} />}
       <div className="shell-main">
         <Topbar onMenu={() => setMenuOpen(true)} lastSyncAt={lastSyncAt} onLogout={() => void logout()} />

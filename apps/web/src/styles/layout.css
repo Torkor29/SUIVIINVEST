@@ -93,6 +93,16 @@
   margin-top: auto;
 }
 
+/* Compte connecté et déconnexion : toujours visibles, y compris sur téléphone
+   (le tiroir latéral est le seul endroit où le bouton ne peut pas être manqué). */
+.sidebar-account {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 .shell-main {
   display: flex;
   flex-direction: column;

@@ -53,7 +53,7 @@ test('déconnexion explicite, puis reconnexion (un seul compte, sans identifiant
     await signIn(page, E2E_PASSWORD);
     await expect(page.locator('.hero-label')).toHaveText('Patrimoine net');
 
-    await page.getByRole('button', { name: 'Se déconnecter' }).click();
+    await page.getByTestId('logout').click();
     await expect(page.getByRole('heading', { name: /Déverrouiller vos données/i })).toBeVisible();
     // Un seul compte, sans identifiant : le champ identifiant n'est pas demandé.
     await expect(page.getByRole('textbox', { name: /Identifiant/i })).toHaveCount(0);
