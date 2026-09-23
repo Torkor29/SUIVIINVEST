@@ -95,3 +95,33 @@ test('Bitcoin : plusieurs wallets possibles, adresse publique seulement', async 
     await ctx.cleanup();
   }
 });
+
+test('clé refusée : la raison précise du connecteur est montrée, pas un libellé générique', async () => {
+  const http = new FakeHttpClient([
+    { match: /\/0\/private\/Balance/, respond: { error: ['EAPI:Invalid key'], result: {} } },
+  ]);
+  const ctx = await createTestApp({ connectorHttp: http });
+  try {
+    const session = await login(ctx);
+    const created = await authRequest(ctx, session, {
+      method: 'POST',
+      url: '/api/connections',
+      payload: {
+        providerId: 'kraken',
+        label: 'Kraken',
+        config: {},
+        secrets: { kraken_api_key: 'cle', kraken_api_secret: Buffer.from('secret').toString('base64') },
+      },
+    });
+    const { id } = created.json() as { id: string };
+    const sync = (await authRequest(ctx, session, { method: 'POST', url: `/api/connections/${id}/sync` })).json() as {
+      status: string;
+      message: string;
+    };
+    assert.equal(sync.status, 'AUTH_REQUIRED');
+    assert.match(sync.message, /Kraken/);
+    assert.ok(!sync.message.includes('secret'), sync.message);
+  } finally {
+    await ctx.cleanup();
+  }
+});

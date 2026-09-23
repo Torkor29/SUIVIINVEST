@@ -282,7 +282,12 @@ export class SyncService {
         : error instanceof Error
           ? error.message
           : 'erreur inconnue';
-      const friendly = describeError(kind);
+      // Connexion refusée, validation attendue, accès limité : le message du
+      // connecteur (rédigé pour l'utilisateur, sans secret) dit précisément quoi faire.
+      const friendly =
+        connectorError && USER_FACING_KINDS.has(kind) && connectorError.message.length <= 400
+          ? connectorError.message
+          : describeError(kind);
       return this.#fail(syncRunId, connection, status, friendly, startedAt, 0, kind, technical);
     }
   }
@@ -410,6 +415,9 @@ export class SyncService {
     };
   }
 }
+
+/** Codes pour lesquels le message du connecteur est montré tel quel à l'utilisateur. */
+const USER_FACING_KINDS: ReadonlySet<string> = new Set(['AUTH_REQUIRED', 'MFA_REQUIRED', 'SESSION_EXPIRED', 'RATE_LIMITED']);
 
 /** Message court présenté à l'utilisateur, dérivé du code d'erreur normalisé. */
 function describeError(kind: string): string {

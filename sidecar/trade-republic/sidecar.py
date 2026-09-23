@@ -150,10 +150,65 @@ def _load_library() -> Any:
     return TradeRepublicApi
 
 
+def normalize_phone(raw: str) -> str:
+    """Numéro au format international attendu par Trade Republic (+33612345678).
+
+    Accepte « 06 12 34 56 78 », « 0033 6… », « 33612345678 » ou « +33 6-12… ».
+    Sans indicatif, un numéro à 10 chiffres commençant par 0 est supposé français.
+    """
+    digits = "".join(ch for ch in raw.strip() if ch.isdigit() or ch == "+")
+    if digits.startswith("00"):
+        digits = "+" + digits[2:]
+    if digits.startswith("+"):
+        return "+" + digits[1:].replace("+", "")
+    if len(digits) == 10 and digits.startswith("0"):
+        return "+33" + digits[1:]
+    if len(digits) == 11 and digits.startswith("33"):
+        return "+" + digits
+    return digits
+
+
+def _http_status(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def _login_refused(exc: Exception) -> SidecarError:
+    """Échec de l'envoi du numéro et du PIN : aucune demande n'a pu partir vers l'application."""
+    status = _http_status(exc)
+    text = str(exc)
+    if status == 429 or "429" in text or "too many" in text.lower():
+        return SidecarError(
+            "RATE_LIMITED",
+            "Trade Republic bloque temporairement les connexions (trop de tentatives). Réessayez dans 15 à 30 minutes.",
+        )
+    if status in (400, 401, 403, 404, 422):
+        return SidecarError(
+            "AUTH_REQUIRED",
+            f"Trade Republic refuse le numéro ou le PIN (HTTP {status}) : aucune demande n'a été envoyée à "
+            "l'application. Vérifiez le numéro au format international (+33612345678) et le PIN à 4 chiffres.",
+        )
+    if "awselb" in text.lower() or status == 405:
+        return SidecarError(
+            "PROVIDER_BROKEN",
+            "Trade Republic a bloqué la demande de connexion (protection anti-robot). Réessayez plus tard.",
+        )
+    return _classify_exception(exc)
+
+
 def _classify_exception(exc: Exception) -> SidecarError:
     name = type(exc).__name__
     text = str(exc)
     lowered = text.lower()
+    if "rejected" in lowered or "already been used" in lowered:
+        return SidecarError(
+            "AUTH_REQUIRED",
+            "La connexion a été refusée dans l'application Trade Republic : relancez la synchronisation et acceptez-la.",
+            requires_user_action=True,
+        )
+    if "expired" in lowered and "login request" in lowered:
+        return SidecarError("MFA_REQUIRED", MFA_MESSAGE, requires_user_action=True)
     if name in ("TimeoutError",) or "not confirmed in time" in lowered or "still waiting" in lowered:
         return SidecarError("MFA_REQUIRED", MFA_MESSAGE, requires_user_action=True)
     if "authenticator" in lowered or "weblogin" in lowered or "confirm the login" in lowered:
@@ -164,10 +219,12 @@ def _classify_exception(exc: Exception) -> SidecarError:
         return SidecarError("MFA_REQUIRED", MFA_MESSAGE, requires_user_action=True)
     if "pin" in lowered or "credentials" in lowered or "phone" in lowered:
         return SidecarError("AUTH_REQUIRED", "Identifiants Trade Republic refusés : vérifiez-les.")
-    if "401" in lowered or "unauthor" in lowered or "session" in lowered or "login failed" in lowered:
+    if "login failed" in lowered:
+        return SidecarError("AUTH_REQUIRED", f"Connexion Trade Republic refusée ({text[:120]}).")
+    if "401" in lowered or "unauthor" in lowered or "session" in lowered:
         return SidecarError(
             "SESSION_EXPIRED",
-            "Session Trade Republic invalide ou expirée : reconnectez-vous (validation dans l'application).",
+            "Session Trade Republic expirée : relancez la synchronisation et acceptez la connexion dans l'application.",
         )
     if any(token in lowered for token in ("connection", "timeout", "timed out", "ssl", "dns", "awselb")):
         return SidecarError("PROVIDER_DOWN", "Service Trade Republic injoignable : réessayez plus tard.")
@@ -201,7 +258,7 @@ def _complete_weblogin_bounded(tr: Any, timeout_seconds: float) -> None:
 def _open_api(secrets: dict, params: dict) -> Any:
     """Ouvre (ou reprend) une session de lecture seule et renvoie le client ``pytr``."""
     TradeRepublicApi = _load_library()
-    phone = (secrets.get("phone") or "").strip()
+    phone = normalize_phone(secrets.get("phone") or "")
     pin = (secrets.get("pin") or "").strip()
     verify_code = (secrets.get("verify_code") or secrets.get("two_factor_code") or "").strip()
     if not phone:
@@ -210,7 +267,8 @@ def _open_api(secrets: dict, params: dict) -> Any:
             "Numéro de téléphone Trade Republic requis : renseignez-le dans SuiviInvest "
             "(chiffré en base, transmis ici sans être écrit sur disque).",
         )
-    approval_timeout = float(params.get("approvalTimeoutSeconds") or 100)
+    # Moins de 100 s : au-delà, Cloudflare coupe la requête avant la réponse.
+    approval_timeout = float(params.get("approvalTimeoutSeconds") or 75)
     try:
         # save_cookies=True : pytr écrit ~/.pytr/cookies.<phone>.txt, SEUL état de
         # session persisté ; aucun mot de passe n'y figure.
@@ -230,7 +288,10 @@ def _open_api(secrets: dict, params: dict) -> Any:
                 "PIN Trade Republic requis pour la première connexion (ou une session déjà "
                 "validée dans ~/.pytr).",
             )
-        tr.initiate_weblogin()
+        try:
+            tr.initiate_weblogin()
+        except Exception as exc:  # noqa: BLE001
+            raise _login_refused(exc) from exc
         if getattr(tr, "weblogin_needs_authenticator", False):
             if not verify_code:
                 raise SidecarError("MFA_REQUIRED", MFA_MESSAGE, requires_user_action=True)
