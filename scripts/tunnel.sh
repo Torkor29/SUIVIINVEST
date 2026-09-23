@@ -84,14 +84,19 @@ case "${1:-}" in
     $DOCKER compose up -d suiviinvest
     $DOCKER compose --profile tunnel-domain up -d --force-recreate cloudflared-domain
     echo -n "Connexion du tunnel"
+    # Journaux lus en entier avant la recherche : avec « pipefail », un
+    # « docker logs | grep -q » peut échouer alors que la ligne est présente.
+    CONNECTED=false
     for _ in $(seq 1 30); do
-      if $DOCKER logs suiviinvest-tunnel-domain 2>&1 | grep -q 'Registered tunnel connection'; then break; fi
+      LOGS="$($DOCKER logs suiviinvest-tunnel-domain 2>&1 || true)"
+      if grep -q 'Registered tunnel connection' <<<"$LOGS"; then CONNECTED=true; break; fi
       echo -n "."
       sleep 2
     done
     echo
-    if ! $DOCKER logs suiviinvest-tunnel-domain 2>&1 | grep -q 'Registered tunnel connection'; then
-      echo "Le tunnel ne se connecte pas (jeton invalide ?) : $DOCKER logs suiviinvest-tunnel-domain" >&2
+    if [ "$CONNECTED" != true ]; then
+      echo "Le tunnel ne se connecte pas. Dernières lignes du journal :" >&2
+      tail -n 15 <<<"$LOGS" >&2
       exit 1
     fi
     echo "✔ Votre application : $DOMAIN_URL"
