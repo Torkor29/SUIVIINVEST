@@ -33,6 +33,8 @@ test('parcours complet : configuration, session, écriture protégée par CSRF',
     role: null,
     accountsCount: 0,
     usernameRequired: false,
+    displayName: null,
+    emailResetAvailable: false,
   });
 
   // 3. configuration initiale : mot de passe trop faible refusé

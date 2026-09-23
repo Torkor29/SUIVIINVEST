@@ -92,6 +92,8 @@ export interface AdminRoutesDeps {
     backupDirectory: string;
     backupRetentionDays: number;
     sessionTtlMinutes: number;
+    backupsEncrypted: boolean;
+    emailConfigured: boolean;
     databasePath: string;
     version: string;
   };
@@ -391,6 +393,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
         sessionTtlMinutes: deps.config.sessionTtlMinutes,
         argon2Params: ARGON2_DESCRIPTION,
         encryption: 'AES-256-GCM (clé dérivée HKDF-SHA256 depuis SUIVIINVEST_MASTER_KEY)',
+        backupsEncrypted: deps.config.backupsEncrypted,
+        emailConfigured: deps.config.emailConfigured,
       },
       version: deps.config.version,
       databasePath: deps.config.databasePath,

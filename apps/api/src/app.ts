@@ -28,6 +28,7 @@ import { MarketDataService, type PriceProvider } from './services/marketdata.ts'
 import { PortfolioService } from './services/portfolio.ts';
 import { RealEstateService } from './services/realestate.ts';
 import { SyncService } from './services/sync.ts';
+import { createMailer, type Mailer } from './services/mailer.ts';
 import { createE2eConnectors } from './testing/e2e-connectors.ts';
 
 /**
@@ -57,6 +58,8 @@ export interface AppDeps {
    * lisent l'état réel au moment de la requête (démarrer l'ordonnanceur après
    * `buildApp` ne doit pas figer une valeur `false`).
    */
+  /** Envoi d'e-mails (tests : `MemoryMailer`). Par défaut, déduit de la configuration. */
+  readonly mailer?: Mailer;
   readonly schedulerState?: { current: { isRunning: () => boolean; nextRun: () => string | null; lastRun: () => string | null } | null };
 }
 
@@ -106,7 +109,9 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   const auth = new AuthService(db, {
     ttlMinutes: config.sessionTtlMinutes,
     cookieSecure: config.cookieSecure,
+    masterKey: config.masterKey,
   });
+  const mailer = deps.mailer ?? createMailer({ smtpUrl: config.smtpUrl, from: config.mailFrom });
   const audit = new AuditRepository(db);
   const settings = new SettingsRepository(db);
   const properties = new PropertyRepository(db);
@@ -127,6 +132,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   const backup = new BackupService(db, {
     directory: config.backupDirectory,
     retentionDays: config.backupRetentionDays,
+    ...(config.backupEncryption ? { masterKey: config.masterKey } : {}),
   });
 
   // Les synchronisations interrompues par un arrêt brutal sont marquées en échec.
@@ -225,7 +231,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   /* ----------------------------------------------------------------- routes */
 
-  await registerAuthRoutes(app, { auth, audit });
+  await registerAuthRoutes(app, { auth, audit, mailer, publicUrl: config.publicUrl, logger });
   await registerWealthRoutes(app, { db, portfolio, crypto, realEstate, properties });
   // Saisie manuelle : indispensable pour les sources qui ne fournissent pas les
   // positions (Crédit Agricole) — l'utilisateur complète ce que l'API ne donne pas.
@@ -250,6 +256,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       backupDirectory: config.backupDirectory,
       backupRetentionDays: config.backupRetentionDays,
       sessionTtlMinutes: config.sessionTtlMinutes,
+      backupsEncrypted: config.backupEncryption,
+      emailConfigured: mailer.configured,
       databasePath: config.databasePath,
       version: config.version,
     },

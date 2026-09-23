@@ -72,6 +72,10 @@ export default defineConfig({
     trace: 'off',
     video: 'off',
     screenshot: 'off',
+    // Navigateur déjà installé ailleurs (CI, image figée) : chemin explicite.
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
+      : {}),
   },
   webServer: {
     command: 'node e2e/scripts/serve.mjs',

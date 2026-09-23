@@ -119,6 +119,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const auth = new AuthService(db, {
     ttlMinutes: config.sessionTtlMinutes,
     cookieSecure: config.cookieSecure,
+    masterKey: config.masterKey,
   });
 
   if (args.has('list')) {

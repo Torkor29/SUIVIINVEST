@@ -49,6 +49,16 @@ export interface AppConfig {
    * Refusé en production (garde explicite dans `buildApp`).
    */
   readonly e2eConnectors: boolean;
+  /**
+   * Envoi d'e-mails (liens « mot de passe oublié »). Facultatif :
+   * `smtp://utilisateur:motdepasse@smtp.exemple.fr:587` ou `smtps://…:465`.
+   */
+  readonly smtpUrl: string | null;
+  readonly mailFrom: string | null;
+  /** Adresse publique de l'application, pour construire les liens envoyés par e-mail. */
+  readonly publicUrl: string | null;
+  /** Chiffre les sauvegardes sur le disque avec une clé dérivée de la clé maîtresse. */
+  readonly backupEncryption: boolean;
 }
 
 const DEFAULTS = {
@@ -158,7 +168,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     version: env.SUIVIINVEST_VERSION ?? '0.2.0',
     integrationKeys: parseIntegrationKeys(env),
     e2eConnectors: parseBoolean(env.SUIVIINVEST_E2E_CONNECTORS, false),
+    smtpUrl: nonEmpty(env.SUIVIINVEST_SMTP_URL),
+    mailFrom: nonEmpty(env.SUIVIINVEST_MAIL_FROM),
+    publicUrl: nonEmpty(env.SUIVIINVEST_PUBLIC_URL)?.replace(/\/+$/, '') ?? null,
+    backupEncryption: parseBoolean(env.SUIVIINVEST_BACKUP_ENCRYPTION, true),
   };
+}
+
+function nonEmpty(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 /**
@@ -180,6 +200,10 @@ export function describeConfig(config: AppConfig): Record<string, unknown> {
     // Noms des clés présentes, jamais leurs valeurs.
     integrationKeys: Object.keys(config.integrationKeys).sort(),
     e2eConnectors: config.e2eConnectors,
+    // Présence seulement : l'URL SMTP contient un mot de passe.
+    email: config.smtpUrl ? 'configuré' : 'non configuré',
+    publicUrl: config.publicUrl,
+    backupEncryption: config.backupEncryption,
     staticDirectory: config.staticDirectory,
     version: config.version,
   };

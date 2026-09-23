@@ -52,6 +52,63 @@ export interface SessionResponse {
    * sans identifiant) garde l'écran « mot de passe seul ».
    */
   readonly usernameRequired: boolean;
+  /** Nom affiché du compte connecté (facultatif). */
+  readonly displayName?: string | null;
+  /**
+   * true = le serveur sait envoyer un e-mail (SMTP configuré) : le parcours
+   * « Mot de passe oublié » propose alors un lien par e-mail.
+   */
+  readonly emailResetAvailable?: boolean;
+}
+
+/** Profil du compte connecté. L'e-mail est déchiffré pour son seul titulaire. */
+export interface ProfileResponse {
+  readonly id: string;
+  readonly username: string | null;
+  readonly displayName: string | null;
+  readonly email: string | null;
+  readonly role: AccountRole;
+  readonly createdAt: string;
+  readonly lastLoginAt: string | null;
+  readonly passwordChangedAt: string | null;
+  readonly hasRecoveryCode: boolean;
+}
+
+export interface UpdateProfileRequest {
+  readonly displayName?: string | null;
+  readonly email?: string | null;
+  readonly username?: string;
+}
+
+/** Une session ouverte (appareil connecté). Jamais le jeton lui-même. */
+export interface DeviceSessionDto {
+  readonly id: string;
+  readonly current: boolean;
+  readonly createdAt: string;
+  readonly lastSeenAt: string;
+  readonly expiresAt: string;
+  /** Libellé lisible déduit du user-agent (« Chrome sur macOS »). */
+  readonly device: string;
+  readonly ip: string | null;
+}
+
+export interface DeviceSessionListResponse {
+  readonly sessions: readonly DeviceSessionDto[];
+}
+
+export interface ForgotPasswordRequest {
+  /** Identifiant OU adresse e-mail. */
+  readonly identifier: string;
+}
+
+export interface ForgotPasswordResponse {
+  /** Toujours le même message, que le compte existe ou non. */
+  readonly message: string;
+}
+
+export interface ResetPasswordRequest {
+  readonly token: string;
+  readonly newPassword: string;
 }
 
 export interface LoginRequest {
@@ -63,6 +120,7 @@ export interface SetupRequest {
   readonly password: string;
   readonly username?: string | null;
   readonly displayName?: string | null;
+  readonly email?: string | null;
 }
 
 /**
@@ -86,6 +144,8 @@ export interface AccountSummaryDto {
   readonly passwordChangedAt: string | null;
   /** true = un code de récupération existe pour ce compte (jamais relisible). */
   readonly hasRecoveryCode: boolean;
+  /** true = une adresse e-mail (chiffrée) est enregistrée. */
+  readonly hasEmail?: boolean;
 }
 
 export interface AccountListResponse {
@@ -798,6 +858,10 @@ export interface SettingsDto {
     readonly sessionTtlMinutes: number;
     readonly argon2Params: string;
     readonly encryption: string;
+    /** Les sauvegardes sont-elles chiffrées sur le disque ? */
+    readonly backupsEncrypted?: boolean;
+    /** Envoi d'e-mails configuré (liens de réinitialisation). */
+    readonly emailConfigured?: boolean;
   };
   readonly version: string;
   readonly databasePath: string;

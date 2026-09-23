@@ -1,5 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { BACKUP_KEY_INFO, deriveKey } from '../security/crypto.ts';
 import type { Db } from '../db/database.ts';
 import { Db as Database } from '../db/database.ts';
 
@@ -12,6 +15,11 @@ import { Db as Database } from '../db/database.ts';
  *    sans arrêter le serveur ;
  *  - **JSON** : export complet, lisible et versionnable, utilisable pour migrer ;
  *  - **CSV** : une table = un fichier, exploitable dans un tableur.
+ *
+ * Chiffrement : avec une clé maîtresse (par défaut en production), chaque
+ * fichier est chiffré en AES-256-GCM (suffixe `.enc`) avant d'être posé sur le
+ * disque. Un fichier de sauvegarde copié hors du serveur est donc illisible sans
+ * `SUIVIINVEST_MASTER_KEY`. Déchiffrement : `node apps/api/src/cli/decrypt-backup.ts`.
  *
  * Rétention : les sauvegardes de plus de N jours sont supprimées (configurable).
  * La restauration est documentée dans README.md (procédure opérateur).
@@ -28,6 +36,39 @@ export interface BackupFile {
 export interface BackupOptions {
   readonly directory: string;
   readonly retentionDays: number;
+  /** Présente = sauvegardes chiffrées (AES-256-GCM, clé dérivée HKDF). */
+  readonly masterKey?: string;
+}
+
+/** En-tête d'un fichier chiffré : magie + version, puis IV (12), chiffré, tag (16). */
+const ENCRYPTED_MAGIC = Buffer.from('SUIVIINVEST-ENC1\n', 'utf8');
+
+export function encryptBackupBytes(plain: Buffer, masterKey: string): Buffer {
+  const key = deriveKey(masterKey, BACKUP_KEY_INFO);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const body = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([ENCRYPTED_MAGIC, iv, body, cipher.getAuthTag()]);
+}
+
+export function isEncryptedBackup(bytes: Buffer): boolean {
+  return bytes.subarray(0, ENCRYPTED_MAGIC.length).equals(ENCRYPTED_MAGIC);
+}
+
+export function decryptBackupBytes(bytes: Buffer, masterKey: string): Buffer {
+  if (!isEncryptedBackup(bytes)) throw new Error("Ce fichier n'est pas une sauvegarde chiffrée SuiviInvest.");
+  const key = deriveKey(masterKey, BACKUP_KEY_INFO);
+  const start = ENCRYPTED_MAGIC.length;
+  const iv = bytes.subarray(start, start + 12);
+  const tag = bytes.subarray(bytes.length - 16);
+  const body = bytes.subarray(start + 12, bytes.length - 16);
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(body), decipher.final()]);
+  } catch {
+    throw new Error('Déchiffrement impossible : clé maîtresse différente ou fichier altéré.');
+  }
 }
 
 /** Tables exportées : liste explicite pour ne jamais exporter une future table sensible par accident. */
@@ -56,11 +97,13 @@ export class BackupService {
   readonly #db: Db;
   readonly #directory: string;
   readonly #retentionDays: number;
+  readonly #masterKey: string | null;
 
   constructor(db: Db, options: BackupOptions) {
     this.#db = db;
     this.#directory = options.directory;
     this.#retentionDays = options.retentionDays;
+    this.#masterKey = options.masterKey ?? null;
     if (!existsSync(this.#directory)) mkdirSync(this.#directory, { recursive: true });
   }
 
@@ -72,6 +115,22 @@ export class BackupService {
     return EXCLUDED_TABLES;
   }
 
+  get encrypted(): boolean {
+    return this.#masterKey !== null;
+  }
+
+  /** Écrit un fichier, chiffré si une clé est configurée. Retourne le chemin final. */
+  #write(path: string, content: Buffer | string): string {
+    const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
+    if (this.#masterKey === null) {
+      writeFileSync(path, bytes, { mode: 0o600 });
+      return path;
+    }
+    const target = `${path}.enc`;
+    writeFileSync(target, encryptBackupBytes(bytes, this.#masterKey), { mode: 0o600 });
+    return target;
+  }
+
   /** Sauvegarde SQLite cohérente + export JSON du même instant. */
   create(kind: 'sqlite' | 'json' | 'csv' | 'all' = 'all'): BackupFile[] {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -79,19 +138,30 @@ export class BackupService {
 
     if (kind === 'sqlite' || kind === 'all') {
       const path = join(this.#directory, `suiviinvest-${stamp}.db`);
-      this.#db.backupTo(path);
-      created.push(this.#describe(path, 'sqlite'));
+      if (this.#masterKey === null) {
+        this.#db.backupTo(path);
+        created.push(this.#describe(path, 'sqlite'));
+      } else {
+        // Copie cohérente dans un fichier temporaire, chiffrée puis effacée :
+        // aucune version en clair ne reste dans le répertoire de sauvegarde.
+        const temporary = join(tmpdir(), `suiviinvest-${stamp}-${randomBytes(4).toString('hex')}.db`);
+        this.#db.backupTo(temporary);
+        try {
+          created.push(this.#describe(this.#write(path, readFileSync(temporary)), 'sqlite'));
+        } finally {
+          unlinkSync(temporary);
+        }
+      }
     }
     if (kind === 'json' || kind === 'all') {
       const path = join(this.#directory, `suiviinvest-${stamp}.json`);
-      writeFileSync(path, JSON.stringify(this.exportJson(), null, 2), 'utf8');
-      created.push(this.#describe(path, 'json'));
+      created.push(this.#describe(this.#write(path, JSON.stringify(this.exportJson(), null, 2)), 'json'));
     }
     if (kind === 'csv' || kind === 'all') {
       const directory = join(this.#directory, `csv-${stamp}`);
       mkdirSync(directory, { recursive: true });
       for (const table of EXPORTED_TABLES) {
-        writeFileSync(join(directory, `${table}.csv`), this.exportCsv(table), 'utf8');
+        this.#write(join(directory, `${table}.csv`), this.exportCsv(table));
       }
       created.push({
         name: `csv-${stamp}`,
@@ -147,9 +217,9 @@ export class BackupService {
       .map((name) => {
         const path = join(this.#directory, name);
         const stats = statSync(path);
-        const kind: BackupFile['kind'] = name.endsWith('.db')
+        const kind: BackupFile['kind'] = name.endsWith('.db') || name.endsWith('.db.enc')
           ? 'sqlite'
-          : name.endsWith('.json')
+          : name.endsWith('.json') || name.endsWith('.json.enc')
             ? 'json'
             : 'csv';
         return {
@@ -193,8 +263,17 @@ export class BackupService {
    * premier (voir la procédure de restauration documentée dans README.md).
    */
   verify(path: string): { ok: boolean; tables: number; message: string } {
+    let temporary: string | null = null;
     try {
-      const probe = new DbProbe(path);
+      let target = path;
+      const bytes = readFileSync(path);
+      if (isEncryptedBackup(bytes)) {
+        if (this.#masterKey === null) throw new Error('Sauvegarde chiffrée : clé maîtresse requise.');
+        temporary = join(tmpdir(), `suiviinvest-verify-${randomBytes(6).toString('hex')}.db`);
+        writeFileSync(temporary, decryptBackupBytes(bytes, this.#masterKey), { mode: 0o600 });
+        target = temporary;
+      }
+      const probe = new DbProbe(target);
       const result = probe.check();
       probe.close();
       return result;
@@ -204,6 +283,16 @@ export class BackupService {
         tables: 0,
         message: error instanceof Error ? error.message : 'fichier illisible',
       };
+    } finally {
+      if (temporary !== null) {
+        for (const suffix of ['', '-wal', '-shm']) {
+          try {
+            unlinkSync(`${temporary}${suffix}`);
+          } catch {
+            /* déjà absent */
+          }
+        }
+      }
     }
   }
 

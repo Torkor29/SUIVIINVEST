@@ -14,6 +14,7 @@ import { loadConfig } from '../src/config.ts';
 import { Db } from '../src/db/database.ts';
 import { createSilentLogger } from '../src/logger.ts';
 import { StaticPriceProvider } from '../src/services/marketdata.ts';
+import type { Mailer } from '../src/services/mailer.ts';
 
 /**
  * Utilitaires de test.
@@ -107,6 +108,7 @@ export interface TestAppOptions {
   readonly connectors?: readonly Connector[];
   readonly providers?: Parameters<typeof buildApp>[0]['providers'];
   readonly env?: Record<string, string>;
+  readonly mailer?: Mailer;
 }
 
 export async function createTestApp(options: TestAppOptions = {}): Promise<TestContext> {
@@ -132,6 +134,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
     config,
     logger: createSilentLogger(),
     registry,
+    ...(options.mailer ? { mailer: options.mailer } : {}),
     providers: options.providers ?? [
       new StaticPriceProvider({
         quotes: { unset: [] },

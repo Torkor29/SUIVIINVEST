@@ -2,6 +2,7 @@ import type { Db } from '../db/database.ts';
 import { randomToken, safeEqual, sha256 } from './crypto.ts';
 import { hashPassword, verifyPassword } from './password.ts';
 import { generateRecoveryCode, hashRecoveryCode, verifyRecoveryCode } from './recovery.ts';
+import { EmailVault, looksLikeEmail, normalizeEmail, validateEmail } from './pii.ts';
 
 /**
  * Comptes et sessions, pour une application auto-hébergée.
@@ -49,6 +50,8 @@ export interface AccountRow {
   readonly last_login_at: string | null;
   readonly password_changed_at: string | null;
   readonly created_at: string;
+  readonly email_ciphertext: string | null;
+  readonly email_index: string | null;
 }
 
 /** Vue publique d'un compte : jamais de hachage, jamais de code. */
@@ -63,7 +66,27 @@ export interface AccountSummary {
   readonly passwordChangedAt: string | null;
   /** true = un code de récupération existe (il n'est jamais relisible). */
   readonly hasRecoveryCode: boolean;
+  /** true = une adresse e-mail (chiffrée) est enregistrée. */
+  readonly hasEmail: boolean;
 }
+
+/** Profil complet du titulaire (e-mail déchiffré pour lui seul). */
+export interface AccountProfile extends AccountSummary {
+  readonly email: string | null;
+}
+
+export interface DeviceSession {
+  readonly id: string;
+  readonly current: boolean;
+  readonly createdAt: string;
+  readonly lastSeenAt: string;
+  readonly expiresAt: string;
+  readonly device: string;
+  readonly ip: string | null;
+}
+
+/** Durée de validité d'un lien de réinitialisation envoyé par e-mail. */
+export const RESET_TOKEN_TTL_MINUTES = 30;
 
 export interface LoginInput {
   readonly password: string;
@@ -112,11 +135,13 @@ export class AuthService {
   readonly #db: Db;
   readonly #ttlMinutes: number;
   readonly #secure: boolean;
+  readonly #emails: EmailVault;
 
-  constructor(db: Db, options: { ttlMinutes: number; cookieSecure: boolean }) {
+  constructor(db: Db, options: { ttlMinutes: number; cookieSecure: boolean; masterKey: string }) {
     this.#db = db;
     this.#ttlMinutes = options.ttlMinutes;
     this.#secure = options.cookieSecure;
+    this.#emails = new EmailVault(options.masterKey);
   }
 
   /* ------------------------------------------------------------------ comptes */
@@ -150,7 +175,7 @@ export class AuthService {
   async setup(
     password: string,
     meta: SessionMeta,
-    options: { username?: string | null; displayName?: string | null } = {},
+    options: { username?: string | null; displayName?: string | null; email?: string | null } = {},
   ): Promise<LoginSuccess & { recoveryCode: string }> {
     if (!this.needsSetup()) {
       throw new Error('Un compte existe déjà : utilisez la connexion.');
@@ -160,6 +185,7 @@ export class AuthService {
       const problem = validateUsername(username);
       if (problem) throw new Error(problem);
     }
+    const email = this.#prepareEmail(options.email ?? null, null);
     const passwordHash = await hashPassword(password);
     const recoveryCode = generateRecoveryCode();
     const now = new Date().toISOString();
@@ -176,6 +202,7 @@ export class AuthService {
       now,
       now,
     );
+    if (email !== null) this.#writeEmail('owner', email);
     const session = this.#createSession('owner', meta);
     return { ...session, userId: 'owner', username, role: 'OWNER' as AccountRole, recoveryCode };
   }
@@ -192,7 +219,13 @@ export class AuthService {
    * pourrait plus se reconnecter (le formulaire ne saurait plus le distinguer).
    */
   async createAccount(
-    input: { username: string; password: string; displayName?: string | null; role?: AccountRole },
+    input: {
+      username: string;
+      password: string;
+      displayName?: string | null;
+      role?: AccountRole;
+      email?: string | null;
+    },
     actor: AuthenticatedSession,
     actorUsername?: string | null,
   ): Promise<AccountWithRecovery> {
@@ -201,6 +234,7 @@ export class AuthService {
     if (problem) throw new Error(problem);
     const existing = this.#findByUsername(username);
     if (existing) throw new Error('Cet identifiant est déjà utilisé.');
+    const email = this.#prepareEmail(input.email ?? null, null);
 
     const passwordHash = await hashPassword(input.password);
     const recoveryCode = generateRecoveryCode();
@@ -244,6 +278,7 @@ export class AuthService {
       now,
       actor.userId,
     );
+    if (email !== null) this.#writeEmail(id, email);
     const created = this.#findById(id);
     if (!created) throw new Error('Création du compte impossible.');
     return { account: toSummary(created), recoveryCode };
@@ -267,6 +302,168 @@ export class AuthService {
     const updated = this.#findById(userId);
     if (!updated) throw new Error('Compte introuvable.');
     return toSummary(updated);
+  }
+
+  /* ------------------------------------------------------------------ profil */
+
+  getProfile(userId: string): AccountProfile | null {
+    const row = this.#findById(userId);
+    if (!row) return null;
+    return { ...toSummary(row), email: this.#emails.open(row.email_ciphertext) };
+  }
+
+  /**
+   * Mise à jour du profil par son titulaire : nom affiché, e-mail, identifiant.
+   * `email: null` ou vide supprime l'adresse.
+   */
+  updateProfile(
+    userId: string,
+    patch: { displayName?: string | null; email?: string | null; username?: string },
+  ): AccountProfile {
+    const row = this.#findById(userId);
+    if (!row) throw new Error('Compte introuvable.');
+    const now = new Date().toISOString();
+    if (patch.username !== undefined) this.setUsername(userId, patch.username);
+    if (patch.displayName !== undefined) {
+      const name = patch.displayName === null ? null : patch.displayName.trim();
+      this.#db.run(
+        'UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?',
+        name === '' ? null : name,
+        now,
+        userId,
+      );
+    }
+    if (patch.email !== undefined) {
+      const email = this.#prepareEmail(patch.email, userId);
+      if (email === null) {
+        this.#db.run(
+          'UPDATE users SET email_ciphertext = NULL, email_index = NULL, updated_at = ? WHERE id = ?',
+          now,
+          userId,
+        );
+      } else {
+        this.#writeEmail(userId, email);
+      }
+    }
+    const updated = this.getProfile(userId);
+    if (!updated) throw new Error('Compte introuvable.');
+    return updated;
+  }
+
+  /* ---------------------------------------------------------------- appareils */
+
+  listSessions(userId: string, currentSessionId: string | null): DeviceSession[] {
+    const rows = this.#db.all<{
+      id: string;
+      created_at: string;
+      last_seen_at: string;
+      expires_at: string;
+      user_agent: string | null;
+      ip: string | null;
+    }>(
+      `SELECT id, created_at, last_seen_at, expires_at, user_agent, ip FROM sessions
+        WHERE user_id = ? AND expires_at > ? ORDER BY last_seen_at DESC`,
+      userId,
+      new Date().toISOString(),
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      current: row.id === currentSessionId,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
+      expiresAt: row.expires_at,
+      device: describeUserAgent(row.user_agent),
+      ip: row.ip,
+    }));
+  }
+
+  /** Ferme une session du titulaire (autre appareil). */
+  revokeSession(userId: string, sessionId: string): boolean {
+    const row = this.#db.get<{ id: string }>(
+      'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId,
+    );
+    if (!row) return false;
+    this.#db.run('DELETE FROM sessions WHERE id = ?', sessionId);
+    return true;
+  }
+
+  /** Déconnecte tous les autres appareils ; retourne le nombre de sessions fermées. */
+  logoutOtherSessions(userId: string, keepSessionId: string): number {
+    const before = this.#db.get<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM sessions WHERE user_id = ? AND id <> ?',
+      userId,
+      keepSessionId,
+    );
+    this.#db.run('DELETE FROM sessions WHERE user_id = ? AND id <> ?', userId, keepSessionId);
+    return before?.count ?? 0;
+  }
+
+  /* ------------------------------------------------ réinitialisation par e-mail */
+
+  /**
+   * Prépare un lien de réinitialisation pour un identifiant OU une adresse.
+   *
+   * Retourne null si aucun compte actif avec e-mail ne correspond : l'appelant
+   * répond le MÊME message dans tous les cas (aucune énumération de comptes).
+   * Les liens précédents non utilisés du compte sont invalidés.
+   */
+  createPasswordReset(identifier: string): {
+    token: string;
+    email: string;
+    name: string;
+    expiresAt: string;
+  } | null {
+    const value = identifier.trim();
+    if (value === '') return null;
+    const account = looksLikeEmail(value)
+      ? this.#findByEmail(value)
+      : this.#findByUsername(normalizeUsername(value));
+    if (!account || account.disabled_at !== null) return null;
+    const email = this.#emails.open(account.email_ciphertext);
+    if (email === null) return null;
+
+    const token = randomToken(32);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + RESET_TOKEN_TTL_MINUTES * 60_000).toISOString();
+    this.#db.run(
+      'UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL',
+      now.toISOString(),
+      account.id,
+    );
+    this.#db.run(
+      `INSERT INTO password_resets (id, user_id, token_hash, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      randomToken(12),
+      account.id,
+      sha256(token),
+      now.toISOString(),
+      expiresAt,
+    );
+    return { token, email, name: account.display_name ?? account.username ?? 'vous', expiresAt };
+  }
+
+  /** Le lien est-il encore utilisable ? (sans le consommer) */
+  checkPasswordReset(token: string): boolean {
+    return this.#findReset(token) !== null;
+  }
+
+  /**
+   * Consomme un lien de réinitialisation : nouveau mot de passe, nouveau code de
+   * récupération, toutes les sessions du compte révoquées.
+   */
+  async resetPasswordWithToken(
+    token: string,
+    newPassword: string,
+  ): Promise<{ username: string | null; recoveryCode: string } | null> {
+    const reset = this.#findReset(token);
+    if (!reset) return null;
+    const account = this.#findById(reset.user_id);
+    if (!account || account.disabled_at !== null) return null;
+    this.#db.run('UPDATE password_resets SET used_at = ? WHERE id = ?', new Date().toISOString(), reset.id);
+    const recoveryCode = await this.#writePassword(account.id, newPassword);
+    return { username: account.username, recoveryCode };
   }
 
   listAccounts(): AccountSummary[] {
@@ -477,11 +674,18 @@ export class AuthService {
     // Un changement de mot de passe révoque toutes les sessions : un jeton volé
     // ne survit pas à la reprise en main du compte.
     this.#db.run('DELETE FROM sessions WHERE user_id = ?', userId);
+    this.#db.run(
+      'UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL',
+      now,
+      userId,
+    );
     return recoveryCode;
   }
 
   #resolveLoginAccount(username: string | null): AccountRow | null {
     if (username !== null && username.trim() !== '') {
+      // Le champ « Identifiant » accepte aussi l'adresse e-mail du compte.
+      if (looksLikeEmail(username)) return this.#findByEmail(username);
       return this.#findByUsername(normalizeUsername(username));
     }
     // Sans identifiant : uniquement si un seul compte existe (comportement
@@ -493,6 +697,43 @@ export class AuthService {
   #findByUsername(username: string): AccountRow | null {
     const row = this.#db.get<AccountRow>('SELECT * FROM users WHERE LOWER(username) = ?', username);
     return row ?? null;
+  }
+
+  #findByEmail(email: string): AccountRow | null {
+    if (validateEmail(email) !== null) return null;
+    const row = this.#db.get<AccountRow>('SELECT * FROM users WHERE email_index = ?', this.#emails.index(email));
+    return row ?? null;
+  }
+
+  /** Valide et vérifie l'unicité d'une adresse ; null = pas d'adresse. */
+  #prepareEmail(email: string | null, ownerId: string | null): string | null {
+    if (email === null || email.trim() === '') return null;
+    const problem = validateEmail(email);
+    if (problem) throw new Error(problem);
+    const normalized = normalizeEmail(email);
+    const other = this.#findByEmail(normalized);
+    if (other && other.id !== ownerId) throw new Error('Cette adresse e-mail est déjà utilisée par un autre compte.');
+    return normalized;
+  }
+
+  #writeEmail(userId: string, email: string): void {
+    this.#db.run(
+      'UPDATE users SET email_ciphertext = ?, email_index = ?, updated_at = ? WHERE id = ?',
+      this.#emails.seal(email),
+      this.#emails.index(email),
+      new Date().toISOString(),
+      userId,
+    );
+  }
+
+  #findReset(token: string): { id: string; user_id: string } | null {
+    if (token.trim() === '') return null;
+    const row = this.#db.get<{ id: string; user_id: string; expires_at: string; used_at: string | null }>(
+      'SELECT id, user_id, expires_at, used_at FROM password_resets WHERE token_hash = ?',
+      sha256(token.trim()),
+    );
+    if (!row || row.used_at !== null || row.expires_at <= new Date().toISOString()) return null;
+    return { id: row.id, user_id: row.user_id };
   }
 
   #findById(id: string): AccountRow | null {
@@ -542,7 +783,41 @@ function toSummary(row: AccountRow): AccountSummary {
     lastLoginAt: row.last_login_at,
     passwordChangedAt: row.password_changed_at,
     hasRecoveryCode: row.recovery_hash !== null,
+    hasEmail: row.email_index !== null,
   };
+}
+
+/** Libellé lisible d'un user-agent : « Safari sur iPhone », « Chrome sur Windows ». */
+export function describeUserAgent(userAgent: string | null): string {
+  if (!userAgent) return 'Appareil inconnu';
+  const ua = userAgent;
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\/|Opera/.test(ua)
+      ? 'Opera'
+      : /Firefox\//.test(ua)
+        ? 'Firefox'
+        : /Chrome\/|CriOS\//.test(ua)
+          ? 'Chrome'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : /curl|node|undici|Playwright/i.test(ua)
+              ? 'Client technique'
+              : 'Navigateur';
+  const system = /iPhone/.test(ua)
+    ? 'iPhone'
+    : /iPad/.test(ua)
+      ? 'iPad'
+      : /Android/.test(ua)
+        ? 'Android'
+        : /Mac OS X|Macintosh/.test(ua)
+          ? 'macOS'
+          : /Windows/.test(ua)
+            ? 'Windows'
+            : /Linux/.test(ua)
+              ? 'Linux'
+              : null;
+  return system === null ? browser : `${browser} sur ${system}`;
 }
 
 /** Extrait la valeur d'un cookie depuis l'en-tête `Cookie`. */

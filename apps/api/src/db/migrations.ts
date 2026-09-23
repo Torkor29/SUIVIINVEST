@@ -388,6 +388,35 @@ ALTER TABLE users ADD COLUMN disabled_at TEXT;
 CREATE UNIQUE INDEX idx_users_username ON users(LOWER(username)) WHERE username IS NOT NULL;
 `;
 
+/**
+ * Version 7 — vrai compte : e-mail chiffré, liens de réinitialisation.
+ *
+ * L'adresse e-mail n'est JAMAIS stockée en clair :
+ *  - `email_ciphertext` : AES-256-GCM (clé dérivée de la clé maîtresse, qui n'est
+ *    pas en base) — sert à l'afficher au titulaire et à lui écrire ;
+ *  - `email_index` : HMAC-SHA256 de l'adresse normalisée (« index aveugle ») —
+ *    sert à retrouver un compte par e-mail sans pouvoir remonter à l'adresse.
+ *
+ * Les jetons de réinitialisation ne sont stockés qu'en SHA-256, sont à usage
+ * unique et expirent vite : même avec la base sous les yeux, on ne peut pas s'en
+ * servir.
+ */
+const ACCOUNT_EMAIL_V7 = `
+ALTER TABLE users ADD COLUMN email_ciphertext TEXT;
+ALTER TABLE users ADD COLUMN email_index TEXT;
+CREATE UNIQUE INDEX idx_users_email_index ON users(email_index) WHERE email_index IS NOT NULL;
+
+CREATE TABLE password_resets (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at    TEXT
+);
+CREATE INDEX idx_password_resets_user ON password_resets(user_id);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
@@ -395,4 +424,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 4, name: 'mission2_sync_state_and_snapshots', statements: [MISSION2_V4] },
   { version: 5, name: 'position_quantities', statements: [POSITION_QUANTITIES_V5] },
   { version: 6, name: 'accounts_and_recovery', statements: [ACCOUNTS_V6] },
+  { version: 7, name: 'account_email_and_resets', statements: [ACCOUNT_EMAIL_V7] },
 ];
