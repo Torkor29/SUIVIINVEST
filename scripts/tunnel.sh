@@ -67,7 +67,16 @@ case "${1:-}" in
       echo "Pas de .env : lancez d'abord ./scripts/install-server.sh" >&2
       exit 1
     fi
-    if [ -n "$TOKEN" ]; then set_env CLOUDFLARE_TUNNEL_TOKEN "$TOKEN"; fi
+    if [ -n "$TOKEN" ]; then
+      # Espaces, retours à la ligne et guillemets collés par erreur retirés.
+      TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]\"'"'"'')"
+      if ! printf '%s' "$TOKEN" | grep -qE '^eyJ[A-Za-z0-9+/=_-]{80,}$'; then
+        echo "Ce jeton ne ressemble pas à un jeton de tunnel Cloudflare (${#TOKEN} caractères)." >&2
+        echo "Il commence par « eyJ » et fait environ 180 caractères : copiez tout ce qui suit --token." >&2
+        exit 1
+      fi
+      set_env CLOUDFLARE_TUNNEL_TOKEN "$TOKEN"
+    fi
     if ! grep -q '^CLOUDFLARE_TUNNEL_TOKEN=.\+' .env; then
       echo "Jeton manquant : ajoutez --token <jeton du tunnel Cloudflare>" >&2
       exit 1
