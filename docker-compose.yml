@@ -68,6 +68,25 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # Tunnel Cloudflare vers VOTRE nom de domaine (adresse fixe). Activé par
+  # ./scripts/tunnel.sh --domain … --token … (COMPOSE_PROFILES=tunnel-domain).
+  # Le jeton vient du tableau de bord Cloudflare (Zero Trust → Networks → Tunnels).
+  cloudflared-domain:
+    image: cloudflare/cloudflared:latest
+    container_name: suiviinvest-tunnel-domain
+    profiles: ["tunnel-domain"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - suiviinvest
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 volumes:
   suiviinvest-data:
     name: suiviinvest-data

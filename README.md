@@ -226,9 +226,26 @@ après un redémarrage du serveur) ; le script affiche l'adresse et la règle da
 Une adresse **temporaire** `trycloudflare.com` change quand ce conteneur redémarre :
 `./scripts/tunnel.sh --url` l'affiche ; relancer `./scripts/tunnel.sh` ne la change pas si le
 tunnel tourne déjà. Si l'adresse ne répond plus (erreur « HTTP 530 » ou site introuvable),
-`./scripts/tunnel.sh --new` en crée une nouvelle. L'application
-accepte n'importe quelle adresse ; pour une adresse fixe, créez un tunnel nommé rattaché à
-votre domaine. Désactivation : `./scripts/tunnel.sh --off`.
+`./scripts/tunnel.sh --new` en crée une nouvelle. Désactivation : `./scripts/tunnel.sh --off`.
+
+### Votre nom de domaine (adresse fixe, recommandé)
+
+1. Le domaine doit utiliser les DNS de Cloudflare (acheté chez Cloudflare Registrar, ou
+   ajouté à un compte Cloudflare gratuit en changeant ses serveurs DNS chez le registrar).
+2. Cloudflare → **Zero Trust → Networks → Tunnels → Create a tunnel** (type *Cloudflared*),
+   nommez-le, puis copiez le **jeton** affiché dans la commande d'installation (la longue
+   chaîne après `--token`). Inutile d'installer quoi que ce soit : Docker s'en charge.
+3. Onglet **Public hostname** : sous-domaine (ex. `patrimoine`), votre domaine, service
+   **HTTP**, URL **`suiviinvest:9123`**.
+4. Sur le serveur :
+
+```bash
+/opt/suiviinvest/scripts/tunnel.sh --domain https://patrimoine.mondomaine.fr --token <jeton>
+```
+
+L'adresse temporaire est coupée, la nouvelle est réglée dans `.env` (cookies sécurisés, liens
+de réinitialisation, adresse de retour Enable Banking) et survit aux mises à jour. Aucun port
+n'est ouvert sur le serveur.
 
 ---
 
