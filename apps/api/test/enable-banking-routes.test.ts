@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';
 import { FakeHttpClient } from '@suiviinvest/connectors';
-import { authRequest, createTestApp, login } from './helpers.ts';
+import { authRequest, createTestApp, extractCookie, login } from './helpers.ts';
 
 /**
  * Parcours bancaire complet via Enable Banking, côté API : configuration de
@@ -54,6 +54,7 @@ test('Enable Banking : de la configuration à la première synchronisation', asy
       configured: false,
       applicationId: null,
       redirectUrl: 'https://patrimoine.exemple.fr/connexions/banque',
+      canManage: true,
     });
 
     // Clé illisible : refusée avant d'être enregistrée.
@@ -166,6 +167,62 @@ test('Enable Banking : plusieurs banques, et une banque refusée par l’utilisa
       });
       assert.equal(created.statusCode, 201, created.body);
     }
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test('Enable Banking : le propriétaire configure une fois, un membre relie sa banque sans rien régler', async () => {
+  const ctx = await createTestApp({ connectorHttp: fakeEnableBanking() });
+  try {
+    const owner = await login(ctx);
+    const created = await authRequest(ctx, owner, {
+      method: 'POST',
+      url: '/api/auth/accounts',
+      payload: { username: 'conjoint', password: 'Membre-Autre-Secret-2026', displayName: 'Conjoint', ownerUsername: 'proprietaire' },
+    });
+    assert.equal(created.statusCode, 201, created.body);
+
+    const memberLogin = await ctx.app.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'conjoint', password: 'Membre-Autre-Secret-2026' },
+    });
+    assert.equal(memberLogin.statusCode, 200, memberLogin.body);
+    const member = {
+      cookie: extractCookie(memberLogin.headers['set-cookie']),
+      csrfToken: (memberLogin.json() as { csrfToken: string }).csrfToken,
+    };
+
+    // Avant configuration : le membre ne peut pas régler l'application commune.
+    const status = (await authRequest(ctx, member, { method: 'GET', url: '/api/enable-banking/status' })).json() as {
+      configured: boolean;
+      canManage: boolean;
+    };
+    assert.deepEqual([status.configured, status.canManage], [false, false]);
+    const denied = await authRequest(ctx, member, {
+      method: 'PUT',
+      url: '/api/enable-banking/app',
+      payload: { applicationId: APP_ID, privateKey: PEM },
+    });
+    assert.equal(denied.statusCode, 403);
+
+    // Le propriétaire configure une seule fois…
+    const saved = await authRequest(ctx, owner, {
+      method: 'PUT',
+      url: '/api/enable-banking/app',
+      payload: { applicationId: APP_ID, privateKey: PEM },
+    });
+    assert.equal(saved.statusCode, 200, saved.body);
+
+    // …et le membre relie directement sa banque.
+    const authorize = await authRequest(ctx, member, {
+      method: 'POST',
+      url: '/api/enable-banking/authorize',
+      payload: { aspspName: 'Crédit Agricole', country: 'FR' },
+    });
+    assert.equal(authorize.statusCode, 200, authorize.body);
+    assert.equal((await authRequest(ctx, member, { method: 'DELETE', url: '/api/enable-banking/app' })).statusCode, 403);
   } finally {
     await ctx.cleanup();
   }

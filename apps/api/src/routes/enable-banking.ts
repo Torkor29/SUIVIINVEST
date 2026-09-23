@@ -101,16 +101,26 @@ export async function registerEnableBankingRoutes(app: FastifyInstance, deps: En
     return sendError(reply, 500, 'INTERNAL', 'Erreur inattendue avec Enable Banking.');
   }
 
+  /** L'application Enable Banking est commune à tout le foyer : seul le propriétaire la règle. */
+  function isOwner(request: FastifyRequest): boolean {
+    const session = (request as { session?: { role?: string } }).session;
+    return session === undefined || session.role === 'OWNER';
+  }
+
   app.get('/api/enable-banking/status', async (request, reply) => {
     const creds = await credentials();
     return reply.send({
       configured: creds !== null,
       applicationId: creds?.applicationId ?? null,
       redirectUrl: redirectUrl(request),
+      canManage: isOwner(request),
     });
   });
 
   app.put('/api/enable-banking/app', async (request, reply) => {
+    if (!isOwner(request)) {
+      return sendError(reply, 403, 'FORBIDDEN', 'Seul le propriétaire peut configurer l’application Enable Banking.');
+    }
     const parsed = z
       .object({ applicationId: z.string().min(8).max(200), privateKey: z.string().min(100).max(20_000) })
       .safeParse(request.body);
@@ -130,7 +140,10 @@ export async function registerEnableBankingRoutes(app: FastifyInstance, deps: En
     return reply.send({ configured: true, applicationId: creds.applicationId, redirectUrl: redirectUrl(request) });
   });
 
-  app.delete('/api/enable-banking/app', async (_request, reply) => {
+  app.delete('/api/enable-banking/app', async (request, reply) => {
+    if (!isOwner(request)) {
+      return sendError(reply, 403, 'FORBIDDEN', 'Seul le propriétaire peut configurer l’application Enable Banking.');
+    }
     deps.secrets.delete(APP_ID_SECRET);
     deps.secrets.delete(APP_KEY_SECRET);
     audit.log({ actor: 'owner', action: 'enable_banking.app_removed' });

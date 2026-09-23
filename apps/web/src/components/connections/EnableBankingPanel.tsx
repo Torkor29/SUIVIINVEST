@@ -10,6 +10,8 @@ interface EnableBankingStatus {
   readonly configured: boolean;
   readonly applicationId: string | null;
   readonly redirectUrl: string;
+  /** Propriétaire : peut régler l'application commune (absent sur un ancien serveur). */
+  readonly canManage?: boolean;
 }
 
 interface AspspRow {
@@ -50,13 +52,27 @@ export function EnableBankingPanel({ onChanged }: { readonly onChanged: () => vo
         title="Ajouter une banque"
         subtitle="Accès officiel en lecture seule (open banking européen) : soldes et opérations remontent tout seuls."
         actions={
-          status.data?.configured ? <Badge tone="ok">Application configurée</Badge> : <Badge tone="neutral">À configurer</Badge>
+          status.data?.configured ? (
+            <Badge tone="ok">Application configurée</Badge>
+          ) : (
+            <Badge tone="neutral">À configurer</Badge>
+          )
         }
       >
         {status.data === null ? (
           <p className="muted small">Chargement…</p>
         ) : status.data.configured ? (
-          <BankPicker redirectUrl={status.data.redirectUrl} onChanged={onChanged} onReset={status.reload} />
+          <BankPicker
+            redirectUrl={status.data.redirectUrl}
+            canManage={status.data.canManage !== false}
+            onChanged={onChanged}
+            onReset={status.reload}
+          />
+        ) : status.data.canManage === false ? (
+          <p className="muted" data-testid="enable-banking-owner-only">
+            L’ajout de banques n’est pas encore activé sur ce serveur. Demandez au propriétaire du compte de le
+            configurer une fois : vous pourrez ensuite relier vos banques en quelques clics.
+          </p>
         ) : (
           <AppSetup redirectUrl={status.data.redirectUrl} onSaved={status.reload} />
         )}
@@ -112,10 +128,13 @@ function AppSetup({ redirectUrl, onSaved }: { readonly redirectUrl: string; read
           .
         </li>
         <li>
-          Dans « API applications », enregistrez une application en environnement <strong>Production</strong> ; choisissez
-          « Generate in the browser » pour obtenir la clé privée (fichier <code>.pem</code>).
+          Dans « API applications », enregistrez une application en environnement <strong>Production</strong> ;
+          choisissez « Generate in the browser » pour obtenir la clé privée (fichier <code>.pem</code>).
         </li>
-        <li>Déclarez l’adresse de retour ci-dessous, puis liez vos propres comptes (« Link accounts ») : l’accès est gratuit pour vos comptes.</li>
+        <li>
+          Déclarez l’adresse de retour ci-dessous, puis liez vos propres comptes (« Link accounts ») : l’accès est
+          gratuit pour vos comptes.
+        </li>
         <li>Collez ici l’identifiant de l’application et la clé privée.</li>
       </ol>
       <RedirectHint redirectUrl={redirectUrl} />
@@ -147,7 +166,10 @@ function AppSetup({ redirectUrl, onSaved }: { readonly redirectUrl: string; read
           <input type="file" accept=".pem,.key,.txt" onChange={(event) => readFile(event.target.files?.[0])} />
         </span>
       </label>
-      <p className="muted small">La clé est vérifiée auprès d’Enable Banking puis stockée chiffrée sur votre serveur. Elle n’est jamais réaffichée.</p>
+      <p className="muted small">
+        La clé est vérifiée auprès d’Enable Banking puis stockée chiffrée sur votre serveur. Elle n’est jamais
+        réaffichée.
+      </p>
       <div>
         <button
           type="button"
@@ -176,10 +198,12 @@ function AppSetup({ redirectUrl, onSaved }: { readonly redirectUrl: string; read
 
 function BankPicker({
   redirectUrl,
+  canManage,
   onChanged,
   onReset,
 }: {
   readonly redirectUrl: string;
+  readonly canManage: boolean;
   readonly onChanged: () => void;
   readonly onReset: () => void;
 }) {
@@ -246,12 +270,18 @@ function BankPicker({
                 className={selected === bank.name ? 'bank-item is-selected' : 'bank-item'}
                 onClick={() => setSelected(bank.name)}
               >
-                {bank.logo ? <img src={bank.logo} alt="" loading="lazy" /> : <span className="logo">{bank.name.slice(0, 2)}</span>}
+                {bank.logo ? (
+                  <img src={bank.logo} alt="" loading="lazy" />
+                ) : (
+                  <span className="logo">{bank.name.slice(0, 2)}</span>
+                )}
                 <span>{bank.name}</span>
               </button>
             </li>
           ))}
-          {banks.data !== null && filtered.length === 0 && <li className="muted small">Aucune banque ne correspond.</li>}
+          {banks.data !== null && filtered.length === 0 && (
+            <li className="muted small">Aucune banque ne correspond.</li>
+          )}
         </ul>
       )}
 
@@ -272,7 +302,11 @@ function BankPicker({
             })
           }
         >
-          {authorize.pending ? 'Redirection…' : selected === null ? 'Choisissez une banque' : `Autoriser l’accès à ${selected}`}
+          {authorize.pending
+            ? 'Redirection…'
+            : selected === null
+              ? 'Choisissez une banque'
+              : `Autoriser l’accès à ${selected}`}
         </button>
         <button type="button" className="btn btn-link" onClick={() => setShowPaste((open) => !open)}>
           Le retour de la banque n’a pas abouti ?
@@ -283,8 +317,8 @@ function BankPicker({
       {showPaste && (
         <div className="conn-form">
           <p className="muted small">
-            Après avoir validé chez votre banque, si la page de retour ne s’est pas ouverte correctement, copiez l’adresse
-            complète affichée dans la barre du navigateur et collez-la ici.
+            Après avoir validé chez votre banque, si la page de retour ne s’est pas ouverte correctement, copiez
+            l’adresse complète affichée dans la barre du navigateur et collez-la ici.
           </p>
           <input
             className="input"
@@ -317,25 +351,27 @@ function BankPicker({
         </div>
       )}
 
-      <details className="tech-details">
-        <summary>Réglages de l’application Enable Banking</summary>
-        <RedirectHint redirectUrl={redirectUrl} />
-        <button
-          type="button"
-          className="btn btn-link tone-down"
-          disabled={remove.pending}
-          onClick={() =>
-            void remove.run(async () => {
-              await request('/api/enable-banking/app', { method: 'DELETE' });
-              onReset();
-              return 'Application retirée.';
-            })
-          }
-        >
-          Remplacer l’identifiant et la clé de l’application
-        </button>
-        <ActionFeedback state={remove} />
-      </details>
+      {canManage && (
+        <details className="tech-details">
+          <summary>Réglages de l’application Enable Banking</summary>
+          <RedirectHint redirectUrl={redirectUrl} />
+          <button
+            type="button"
+            className="btn btn-link tone-down"
+            disabled={remove.pending}
+            onClick={() =>
+              void remove.run(async () => {
+                await request('/api/enable-banking/app', { method: 'DELETE' });
+                onReset();
+                return 'Application retirée.';
+              })
+            }
+          >
+            Remplacer l’identifiant et la clé de l’application
+          </button>
+          <ActionFeedback state={remove} />
+        </details>
+      )}
     </div>
   );
 }
