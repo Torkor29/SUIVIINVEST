@@ -157,6 +157,10 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin;
+    // Même origine (le site qui sert l'application) : ce n'est pas du CORS. Les
+    // navigateurs envoient pourtant `Origin` sur les POST et les modules JS ;
+    // les refuser casserait l'appli derrière un tunnel ou un domaine qui change.
+    if (origin && isSameOrigin(origin, request.headers, config)) return undefined;
     if (origin) {
       if (!config.corsOrigins.includes(origin)) {
         // CORS restrictif : aucune origine tierce n'est autorisée par défaut.
@@ -294,4 +298,40 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   }
 
   return { app, db, auth, secrets, sync, imports, marketData, backup, portfolio, crypto, realEstate, settings, audit, properties };
+}
+
+/**
+ * L'origine de la requête est-elle le site lui-même ?
+ *
+ * Comparée à l'hôte demandé (`Host`, ou `X-Forwarded-Host` derrière un proxy de
+ * confiance) et à `SUIVIINVEST_PUBLIC_URL`. Un autre site reste refusé.
+ */
+export function isSameOrigin(
+  origin: string,
+  headers: Readonly<Record<string, string | string[] | undefined>>,
+  config: Pick<AppConfig, 'trustProxy' | 'publicUrl'>,
+): boolean {
+  let originHost: string;
+  let originUrl: string;
+  try {
+    const parsed = new URL(origin);
+    originHost = parsed.host.toLowerCase();
+    originUrl = parsed.origin.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (config.publicUrl !== null) {
+    try {
+      if (new URL(config.publicUrl).origin.toLowerCase() === originUrl) return true;
+    } catch {
+      /* adresse publique mal formée : ignorée */
+    }
+  }
+  const first = (value: string | string[] | undefined): string | null => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    return raw === undefined || raw === '' ? null : (raw.split(',')[0] ?? '').trim().toLowerCase();
+  };
+  const candidates = [first(headers.host)];
+  if (config.trustProxy) candidates.push(first(headers['x-forwarded-host']));
+  return candidates.some((host) => host !== null && host === originHost);
 }

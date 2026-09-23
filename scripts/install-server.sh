@@ -5,6 +5,8 @@
 #   ./scripts/install-server.sh                      # installation ou mise à jour
 #   ./scripts/install-server.sh https://patrimoine.mondomaine.fr   # + adresse publique
 #
+# Pour une mise à jour depuis GitHub, préférez ./scripts/update.sh.
+#
 # Ce que fait le script :
 #   1. crée `.env` s'il n'existe pas, avec une clé maîtresse aléatoire (jamais
 #      écrasée ensuite : la perdre rendrait vos identifiants et sauvegardes
@@ -18,6 +20,18 @@ cd "$(dirname "$0")/.."
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker n'est pas installé : voir la section « Déploiement » du README." >&2
   exit 1
+fi
+
+# Accès à Docker : directement si l'utilisateur est dans le groupe « docker »,
+# sinon via sudo (sans mot de passe interactif pour les mises à jour automatiques).
+DOCKER="docker"
+if ! docker info >/dev/null 2>&1; then
+  if [ -t 0 ] || sudo -n true 2>/dev/null; then
+    DOCKER="sudo docker"
+  else
+    echo "Pas d'accès à Docker. Une fois pour toutes : sudo usermod -aG docker \$USER (puis reconnectez-vous)." >&2
+    exit 1
+  fi
 fi
 
 PUBLIC_URL="${1:-}"
@@ -45,6 +59,19 @@ if [ -n "$PUBLIC_URL" ]; then
     echo "SUIVIINVEST_PUBLIC_URL=${PUBLIC_URL%/}" >> .env
   fi
   echo "✔ Adresse publique : ${PUBLIC_URL%/}"
+  # Adresse HTTPS (Cloudflare, reverse proxy) : cookies « Secure » et en-têtes
+  # du proxy pris en compte.
+  case "$PUBLIC_URL" in
+    https://*)
+      for VAR in SUIVIINVEST_COOKIE_SECURE SUIVIINVEST_TRUST_PROXY; do
+        if grep -q "^${VAR}=" .env; then
+          sed -i "s|^${VAR}=.*$|${VAR}=true|" .env
+        else
+          echo "${VAR}=true" >> .env
+        fi
+      done
+      ;;
+  esac
 fi
 
 chmod 600 .env
@@ -54,8 +81,8 @@ if ! grep -q '^SUIVIINVEST_MASTER_KEY=.\{32,\}' .env; then
   exit 1
 fi
 
-docker compose build
-docker compose up -d
+$DOCKER compose build
+$DOCKER compose up -d
 
 echo -n "Démarrage"
 for _ in $(seq 1 30); do
@@ -68,5 +95,5 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 echo
-echo "Le service ne répond pas encore : docker compose logs -f suiviinvest" >&2
+echo "Le service ne répond pas encore : $DOCKER compose logs -f suiviinvest" >&2
 exit 1

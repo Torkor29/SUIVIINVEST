@@ -15,6 +15,7 @@ et liquidités, réunis dans une seule vue.
 ## Sommaire
 
 - [Ce que fait l'application](#ce-que-fait-lapplication)
+- [Installer ou mettre à jour depuis GitHub](#installer-ou-mettre-à-jour-depuis-github-le-plus-simple)
 - [Déploiement sur Ubuntu (pas à pas)](#déploiement-sur-ubuntu-pas-à-pas)
 - [Reverse proxy HTTPS (Nginx)](#reverse-proxy-https-nginx)
 - [Sécurité](#sécurité)
@@ -150,6 +151,42 @@ Par honnêteté, et parce qu'il vaut mieux le savoir avant de compter sur une so
   Ethereum, Arbitrum, Polygon uniquement) : sur les autres chaînes, Blockscout est utilisé.
 
 Ces limites sont aussi écrites dans le code, aux endroits concernés.
+
+---
+
+## Installer ou mettre à jour depuis GitHub (le plus simple)
+
+Le serveur suit toujours la branche `main` de GitHub. En SSH (Termius par exemple) :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Torkor29/SUIVIINVEST/main/scripts/bootstrap.sh | bash -s -- https://VOTRE-ADRESSE
+```
+
+- première fois : clone dans `/opt/suiviinvest`, crée `.env` et sa clé maîtresse ;
+- dossier copié à la main auparavant : il est relié à GitHub, le `.env` est repris et
+  l'ancien dossier conservé en `/opt/suiviinvest.old-<date>` ;
+- les données (volumes Docker) ne sont jamais touchées.
+
+Ensuite, à chaque nouvelle version poussée sur GitHub :
+
+```bash
+/opt/suiviinvest/scripts/update.sh                 # mise à jour immédiate
+/opt/suiviinvest/scripts/update.sh --auto          # ou : automatique, toutes les 15 min
+```
+
+### Adresse Cloudflare (tunnel)
+
+Un tunnel Cloudflare (`cloudflared tunnel --url http://localhost:9123`) fournit une adresse
+HTTPS : l'application l'accepte telle quelle, même si elle change à chaque redémarrage du
+tunnel. Passez simplement la nouvelle adresse à la mise à jour pour que les liens envoyés
+par e-mail soient justes :
+
+```bash
+/opt/suiviinvest/scripts/update.sh https://nouvelle-adresse.trycloudflare.com
+```
+
+Une adresse **temporaire** (`trycloudflare.com`) change à chaque redémarrage de
+`cloudflared` ; pour une adresse fixe, créez un tunnel nommé rattaché à votre domaine.
 
 ---
 
