@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth.tsx';
 import { AppShell } from './components/layout/AppShell.tsx';
 import { LoginPage } from './pages/Login.tsx';
+import { LogoMark } from './components/ui/Logo.tsx';
 import { ResetPasswordPage } from './pages/ResetPassword.tsx';
 import { ProfilePage } from './pages/Profile.tsx';
 import { DashboardPage } from './pages/Dashboard.tsx';
@@ -50,9 +51,7 @@ function Gate() {
     return (
       <div className="boot">
         <div>
-          <span className="brand-mark boot-mark" aria-hidden="true">
-            S
-          </span>
+          <LogoMark size={44} className="boot-mark" />
           <p className="muted small" style={{ marginTop: 16 }}>
             Chargement…
           </p>

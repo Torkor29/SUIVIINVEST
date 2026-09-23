@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { IconCheck } from '../ui/Icons.tsx';
+import { Logo } from '../ui/Logo.tsx';
 
 /**
  * Mise en page des écrans d'authentification : panneau noir de présentation
@@ -11,11 +12,7 @@ export function AuthLayout({ children }: { readonly children: ReactNode }) {
     <div className="login">
       <aside className="login-aside" aria-hidden="true">
         <div className="brand">
-          <span className="brand-mark">S</span>
-          <span className="brand-text">
-            <strong>SuiviInvest</strong>
-            <small>Patrimoine personnel</small>
-          </span>
+          <Logo subtitle="Patrimoine personnel" />
         </div>
         <div className="login-pitch">
           <h2>Tout votre patrimoine. Une seule vue.</h2>
@@ -62,12 +59,7 @@ export function AuthLayout({ children }: { readonly children: ReactNode }) {
 export function AuthBrand() {
   return (
     <div className="brand brand-login">
-      <span className="brand-mark" aria-hidden="true">
-        S
-      </span>
-      <span className="brand-text">
-        <strong>SuiviInvest</strong>
-      </span>
+      <Logo />
     </div>
   );
 }

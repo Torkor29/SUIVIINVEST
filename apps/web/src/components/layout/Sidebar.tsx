@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { NAV_GROUPS, PROFILE } from '../../nav.ts';
 import { initialsOf } from '../../lib/initials.ts';
 import { IconClose, IconLogout } from '../ui/Icons.tsx';
+import { Logo } from '../ui/Logo.tsx';
 
 export interface SidebarProps {
   readonly open: boolean;
@@ -23,12 +24,7 @@ export function Sidebar({ open, onNavigate, onClose, onLogout, username, display
   return (
     <aside className={open ? 'sidebar is-open' : 'sidebar'} aria-label="Navigation principale">
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true">
-          S
-        </span>
-        <span className="brand-text">
-          <strong>SuiviInvest</strong>
-        </span>
+        <Logo />
         <button type="button" className="btn btn-icon sidebar-close" onClick={onClose} aria-label="Fermer le menu">
           <IconClose size={20} />
         </button>

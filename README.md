@@ -185,7 +185,9 @@ Pour une adresse HTTPS publique sans ouvrir de port :
 Le tunnel tourne dans un conteneur `suiviinvest-tunnel` qui redémarre tout seul (y compris
 après un redémarrage du serveur) ; le script affiche l'adresse et la règle dans `.env`.
 Une adresse **temporaire** `trycloudflare.com` change quand ce conteneur redémarre :
-`./scripts/tunnel.sh --url` l'affiche, `./scripts/tunnel.sh` la remet à jour. L'application
+`./scripts/tunnel.sh --url` l'affiche ; relancer `./scripts/tunnel.sh` ne la change pas si le
+tunnel tourne déjà. Si l'adresse ne répond plus (erreur « HTTP 530 » ou site introuvable),
+`./scripts/tunnel.sh --new` en crée une nouvelle. L'application
 accepte n'importe quelle adresse ; pour une adresse fixe, créez un tunnel nommé rattaché à
 votre domaine. Désactivation : `./scripts/tunnel.sh --off`.
 

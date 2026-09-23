@@ -4,6 +4,7 @@ import { formatRelative } from '../../lib/format.ts';
 import { Badge } from '../ui/Stat.tsx';
 import { IconLogout } from '../ui/Icons.tsx';
 import { ThemeToggle } from './ThemeToggle.tsx';
+import { LogoMark } from '../ui/Logo.tsx';
 
 export interface TopbarProps {
   readonly lastSyncAt: string | null;
@@ -15,9 +16,7 @@ export function Topbar({ lastSyncAt, onLogout }: TopbarProps) {
   return (
     <header className="topbar">
       <Link to="/" className="brand topbar-brand" aria-label="Accueil">
-        <span className="brand-mark" aria-hidden="true">
-          S
-        </span>
+        <LogoMark size={32} />
       </Link>
       <div className="topbar-status">
         {isMockEnabled() && (

@@ -59,6 +59,40 @@
   letter-spacing: -0.04em;
 }
 
+.logo-mark {
+  flex: none;
+  display: block;
+}
+
+.logo-mark-bg {
+  fill: var(--accent);
+}
+
+.logo-mark-line {
+  stroke: var(--accent-contrast);
+}
+
+.logo-mark-dot {
+  fill: #2fd07f;
+}
+
+/* Panneau noir de la page de connexion : logo inversé, quel que soit le thème. */
+.login-aside .logo-mark-bg {
+  fill: #ffffff;
+}
+
+.login-aside .logo-mark-line {
+  stroke: #000000;
+}
+
+.wordmark {
+  letter-spacing: -0.03em;
+}
+
+.wordmark-light {
+  font-weight: 450;
+}
+
 .brand-text {
   display: flex;
   flex-direction: column;

@@ -88,8 +88,24 @@ function toApiError(payload: unknown, status: number): ApiRequestError {
   if (isApiError(payload)) {
     return new ApiRequestError(payload.error.code, payload.error.message, status, payload.error.details);
   }
+  if (isGatewayStatus(status)) {
+    return new ApiRequestError('INTERNAL', GATEWAY_MESSAGE, status, payload);
+  }
   return new ApiRequestError('INTERNAL', `Réponse inattendue du serveur (HTTP ${status}).`, status, payload);
 }
+
+/**
+ * Codes renvoyés par un intermédiaire (Cloudflare, reverse proxy) quand le
+ * serveur de l'application n'est pas joignable : 502/503/504 et 520-530 chez
+ * Cloudflare (530 = tunnel déconnecté).
+ */
+export function isGatewayStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 530);
+}
+
+export const GATEWAY_MESSAGE =
+  'Le serveur ne répond pas pour le moment (redémarrage ou tunnel coupé). ' +
+  'Réessayez dans quelques secondes ; si cela persiste, vérifiez l’adresse du site.';
 
 /**
  * Charge la maquette à la demande : le bundle principal n'embarque pas les
@@ -195,7 +211,9 @@ export function errorMessage(error: unknown): string {
       case 'CONNECTOR_ERROR':
         return `Erreur de synchronisation : ${error.message}`;
       case 'INTERNAL':
-        return error.status === 0 ? 'API injoignable — vérifiez que le serveur est démarré.' : `Erreur serveur : ${error.message}`;
+        if (error.status === 0) return 'Serveur injoignable : vérifiez votre connexion ou l’adresse du site.';
+        if (isGatewayStatus(error.status)) return error.message;
+        return `Erreur serveur : ${error.message}`;
       default:
         return error.message;
     }

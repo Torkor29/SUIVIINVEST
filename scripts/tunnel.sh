@@ -2,8 +2,9 @@
 # Tunnel Cloudflare permanent : l'application devient accessible en HTTPS via une
 # adresse « https://….trycloudflare.com », sans ouvrir de port sur le serveur.
 #
-#   ./scripts/tunnel.sh            # active le tunnel (ou le relance) et affiche l'adresse
+#   ./scripts/tunnel.sh            # active le tunnel et affiche l'adresse (sans la changer s'il tourne déjà)
 #   ./scripts/tunnel.sh --url      # affiche seulement l'adresse en cours
+#   ./scripts/tunnel.sh --new      # force une nouvelle adresse (si l'actuelle ne répond plus)
 #   ./scripts/tunnel.sh --off      # désactive le tunnel
 #
 # Le tunnel tourne dans un conteneur qui redémarre tout seul (même après un
@@ -50,6 +51,19 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# Tunnel déjà actif : on garde son adresse (la changer casserait les pages
+# ouvertes avec l'ancienne, qui répondraient « HTTP 530 »).
+RUNNING="$($DOCKER inspect -f '{{.State.Running}}' suiviinvest-tunnel 2>/dev/null || echo false)"
+if [ "${1:-}" != "--new" ] && [ "$RUNNING" = "true" ]; then
+  URL="$(current_url || true)"
+  if [ -n "$URL" ]; then
+    set_env SUIVIINVEST_PUBLIC_URL "$URL"
+    echo "✔ Tunnel déjà actif, adresse inchangée : $URL"
+    echo "  (nouvelle adresse seulement si celle-ci ne répond plus : ./scripts/tunnel.sh --new)"
+    exit 0
+  fi
+fi
+
 # Le profil « tunnel » est mémorisé dans .env : les mises à jour le relancent.
 set_env COMPOSE_PROFILES tunnel
 $DOCKER compose up -d suiviinvest
@@ -76,7 +90,13 @@ set_env SUIVIINVEST_PUBLIC_URL "$URL"
 set_env SUIVIINVEST_COOKIE_SECURE true
 set_env SUIVIINVEST_TRUST_PROXY true
 chmod 600 .env
-$DOCKER compose up -d suiviinvest >/dev/null
+$DOCKER compose up -d suiviinvest >/dev/null 2>&1
+
+# Attendre que l'application réponde de nouveau avant de donner l'adresse.
+for _ in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:9123/health >/dev/null 2>&1; then break; fi
+  sleep 2
+done
 
 echo
 echo "✔ Votre application : $URL"
