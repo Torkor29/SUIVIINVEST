@@ -17,7 +17,7 @@ export function CryptoPage() {
     <>
       <PageHeader
         title="Crypto"
-        subtitle="Adresses publiques observées — aucune clé privée, aucune signature."
+        subtitle="Vos wallets suivis par adresse publique. Aucune clé privée n’est demandée."
         actions={<Badge tone="info">Lecture seule</Badge>}
       />
       <AsyncView
@@ -26,7 +26,7 @@ export function CryptoPage() {
         data={state.data}
         onRetry={state.reload}
         empty={(data) => data.wallets.length === 0}
-        emptyState={<EmptyState title="Aucun portefeuille" hint="Ajoutez une adresse publique dans Connexions." />}
+        emptyState={<EmptyState title="Aucun portefeuille" hint="Ajoutez l’adresse publique de votre wallet dans Connexions." />}
         skeleton={
           <>
             <SkeletonTiles count={3} />
@@ -39,7 +39,7 @@ export function CryptoPage() {
             <Grid>
               <StatTile label="Total crypto" value={formatEur(data.totalEur)} hint={`${data.wallets.length} portefeuille(s)`} />
               <StatTile label="Chaînes suivies" value={`${data.byChain.length}`} hint={data.byChain.map((slice) => slice.label).join(' · ')} />
-              <StatTile label="Actifs détenus" value={`${data.allocation.length}`} hint="Jetons et stablecoins confondus" />
+              <StatTile label="Actifs détenus" value={`${data.allocation.length}`} hint="Jetons et stablecoins" />
             </Grid>
 
             <Grid className="grid-2">
@@ -49,7 +49,7 @@ export function CryptoPage() {
                   <AllocationLegend slices={data.allocation} />
                 </div>
               </Card>
-              <Card title="Par chaîne" subtitle="Répartition multi-chaînes.">
+              <Card title="Par chaîne" subtitle="Répartition par réseau.">
                 <DonutChart slices={data.byChain} centerLabel="Chaînes" centerValue={formatEur(data.totalEur, 0)} />
                 <AllocationLegend slices={data.byChain} showBars={false} />
               </Card>

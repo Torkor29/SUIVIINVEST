@@ -1,0 +1,13 @@
+# Contexte de build Docker : ni dépendances locales, ni données, ni secrets.
+.git
+**/node_modules
+apps/web/dist
+data
+backups
+.env
+.env.*
+e2e/.auth
+e2e/.artifacts
+*.db
+*.db-wal
+*.db-shm

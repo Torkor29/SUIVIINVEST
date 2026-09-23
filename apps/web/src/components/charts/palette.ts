@@ -1,29 +1,30 @@
 /** Palette catégorielle des graphiques (stable et lisible en clair comme en sombre). */
 export const CATEGORY_COLORS: readonly string[] = [
-  '#4f7cff',
-  '#22b8a0',
-  '#f2a93b',
-  '#a855f7',
-  '#ef5da8',
-  '#38bdf8',
-  '#94a3b8',
-  '#10b981',
-  '#f97316',
-  '#6366f1',
+  '#5b7cfa',
+  '#1fbf8f',
+  '#f5a524',
+  '#9b6cf6',
+  '#f2668b',
+  '#38b6e8',
+  '#9a9aa0',
+  '#34c759',
+  '#ff8a3d',
+  '#7a82ff',
 ];
 
 /** Couleur du poste selon son libellé (les grandes classes gardent une couleur fixe). */
 const CLASS_COLORS: Readonly<Record<string, string>> = {
-  'Actions-ETF': '#4f7cff',
-  Crypto: '#a855f7',
-  Immobilier: '#22b8a0',
-  Cash: '#38bdf8',
-  'Autres actifs': '#f2a93b',
-  Dettes: '#ef4444',
+  'Actions-ETF': '#5b7cfa',
+  'Actions / ETF': '#5b7cfa',
+  Crypto: '#9b6cf6',
+  Immobilier: '#1fbf8f',
+  Cash: '#38b6e8',
+  'Autres actifs': '#f5a524',
+  Dettes: '#e5373f',
 };
 
-export const NEGATIVE_COLOR = '#ef4444';
-export const POSITIVE_COLOR = '#22b8a0';
+export const NEGATIVE_COLOR = '#e5373f';
+export const POSITIVE_COLOR = '#00a86b';
 
 export function sliceColor(index: number): string {
   return CATEGORY_COLORS[index % CATEGORY_COLORS.length] ?? '#94a3b8';

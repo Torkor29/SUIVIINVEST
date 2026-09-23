@@ -244,6 +244,45 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
     return reply.code(204).send();
   });
 
+  /**
+   * Mise à jour des identifiants d'une connexion existante (reconnexion) : les
+   * secrets fournis remplacent les anciens, la configuration non secrète est
+   * fusionnée. Les comptes et l'historique déjà collectés sont conservés.
+   */
+  app.patch('/api/connections/:id', async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const connection = connections.get(id);
+    if (!connection) return sendError(reply, 404, 'NOT_FOUND', 'Connexion introuvable.');
+    const parsed = z
+      .object({
+        config: z.record(z.string()).default({}),
+        secrets: z.record(z.string()).default({}),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) return sendError(reply, 400, 'INVALID_REQUEST', 'Identifiants invalides.');
+    const forbidden = Object.keys(parsed.data.config).filter((key) =>
+      /(seed|mnemonic|private.?key|privatekey|passphrase)/i.test(key),
+    );
+    if (forbidden.length > 0) {
+      return sendError(reply, 400, 'INVALID_REQUEST', `Champs interdits : ${forbidden.join(', ')}.`);
+    }
+    const names = new Set(parseSecretNames(connection.secret_refs_json));
+    for (const [name, value] of Object.entries(parsed.data.secrets)) {
+      deps.secrets.set(`${id}:${name}`, value);
+      names.add(name);
+    }
+    const currentConfig = JSON.parse(connection.config_json || '{}') as Record<string, string>;
+    connections.updateConfig(id, { ...currentConfig, ...parsed.data.config }, [...names]);
+    deps.audit.log({
+      actor: 'owner',
+      action: 'connection.credentials_updated',
+      entity: 'connection',
+      entityId: id,
+      details: { secretNames: Object.keys(parsed.data.secrets) },
+    });
+    return reply.send({ id, providerId: connection.provider_id });
+  });
+
   app.post('/api/connections/:id/test', async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     if (!connections.get(id)) return sendError(reply, 404, 'NOT_FOUND', 'Connexion introuvable.');

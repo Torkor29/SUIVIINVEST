@@ -160,7 +160,7 @@ export class PortfolioService {
     const warnings = [...snapshot.warnings];
     if (windowStart < firstDate) {
       warnings.push(
-        `Historique limité : les données commencent le ${firstDate} (période demandée depuis le ${windowStart}).`,
+        `Votre historique commence le ${frenchDate(firstDate)} : la courbe ne peut pas remonter plus loin.`,
       );
     }
 
@@ -1165,3 +1165,11 @@ export function isoToday(): string {
 }
 
 export { PERIOD_DAYS, pointAt, variation, allocation, WEALTH_CLASSES, CLASS_LABELS };
+
+/** « 2026-02-01 » -> « 1 février 2026 » (messages destinés à l'utilisateur). */
+function frenchDate(isoDay: string): string {
+  const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+  const [year, month, day] = isoDay.slice(0, 10).split('-').map((part) => Number.parseInt(part, 10));
+  if (year === undefined || month === undefined || day === undefined || Number.isNaN(year + month + day)) return isoDay;
+  return `${day === 1 ? '1er' : day} ${months[month - 1] ?? ''} ${year}`;
+}

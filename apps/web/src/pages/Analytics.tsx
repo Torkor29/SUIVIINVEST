@@ -59,7 +59,7 @@ export function AnalyticsPage() {
     <>
       <PageHeader
         title="Analyses"
-        subtitle="Performance pondérée, flux de trésorerie et exposition au risque."
+        subtitle="Votre performance réelle, vos flux mensuels et votre exposition au risque."
         actions={<PeriodSelector value={period} onChange={setPeriod} compact />}
       />
       <AsyncView
@@ -68,7 +68,7 @@ export function AnalyticsPage() {
         data={state.data}
         onRetry={state.reload}
         empty={(data) => data.monthly.length === 0}
-        emptyState={<EmptyState title="Pas encore d’historique" hint="Les analyses s’enrichissent au fil des synchronisations." />}
+        emptyState={<EmptyState title="Pas encore d’historique" hint="Les analyses se remplissent à mesure que vos comptes se synchronisent." />}
         skeleton={
           <>
             <SkeletonTiles count={4} />
@@ -80,9 +80,9 @@ export function AnalyticsPage() {
         {(data) => (
           <>
             <Grid>
-              <StatTile label="TWR" value={formatPercent(data.performance.twr ?? 0)} hint={`Période ${PERIOD_LABELS[period]}`} />
-              <StatTile label="XIRR" value={formatPercent(data.performance.xirr ?? 0)} hint="Rendement pondéré des flux" />
-              <StatTile label="Annualisé" value={formatPercent(data.performance.annualized ?? 0)} hint="Lissé sur 12 mois" />
+              <StatTile label="Performance (TWR)" value={formatPercent(data.performance.twr ?? 0)} hint={`Période ${PERIOD_LABELS[period]}`} />
+              <StatTile label="Rendement annuel (XIRR)" value={formatPercent(data.performance.xirr ?? 0)} hint="Rendement tenant compte de vos versements" />
+              <StatTile label="Annualisé" value={formatPercent(data.performance.annualized ?? 0)} hint="Ramené sur 12 mois" />
               <StatTile
                 label="Baisse maximale"
                 value={formatPercent(data.performance.maxDrawdown ?? 0)}
@@ -92,7 +92,7 @@ export function AnalyticsPage() {
             </Grid>
 
             <Grid className="grid-2">
-              <Card title="Flux nets par mois" subtitle="Revenus moins dépenses et frais.">
+              <Card title="Flux nets par mois" subtitle="Ce qui est entré moins ce qui est sorti, mois par mois.">
                 <BarChart
                   items={data.monthly.map((month) => ({
                     label: month.month,
@@ -104,7 +104,7 @@ export function AnalyticsPage() {
                   ariaLabel="Flux nets mensuels"
                 />
               </Card>
-              <Card title="Investissements mensuels" subtitle="Montants investis (achats d’instruments).">
+              <Card title="Investissements mensuels" subtitle="Ce que vous avez investi chaque mois.">
                 <BarChart
                   items={data.monthly.map((month) => ({ label: month.month, value: month.invested, tone: 'neutral' as const }))}
                   months
@@ -115,25 +115,25 @@ export function AnalyticsPage() {
             </Grid>
 
             <Grid className="grid-2">
-              <Card title="Par classe d’actif" subtitle="Immobilier inclus, dettes déduites.">
+              <Card title="Par classe d’actif" subtitle="Immobilier compris, dettes déduites.">
                 <div className="split">
                   <DonutChart slices={data.allocation.byClass} colorByLabel centerLabel="Allocation" />
                   <AllocationLegend slices={data.allocation.byClass} colorByLabel />
                 </div>
               </Card>
-              <Card title="Par devise et par pays" subtitle="Exposition géographique des actifs.">
+              <Card title="Par devise et par pays" subtitle="Où votre argent est exposé.">
                 <AllocationLegend slices={data.allocation.byCurrency} />
                 <h3 className="sub-title">Par pays</h3>
                 <AllocationLegend slices={data.allocation.byCountry} />
               </Card>
             </Grid>
 
-            <Card title="Principales lignes" subtitle="Huit premiers instruments du portefeuille.">
+            <Card title="Principales lignes" subtitle="Vos huit plus grosses positions.">
               <AllocationLegend slices={data.allocation.byInstrument} />
             </Card>
 
             <Grid className="grid-2">
-              <Card title="Risque" subtitle="Mesures de concentration et d’endettement.">
+              <Card title="Risque" subtitle="Concentration, volatilité et endettement.">
                 <div className="kv-grid">
                   <KeyValue label="Baisse maximale" value={formatPercent(data.risk.maxDrawdown ?? 0)} tone="down" />
                   <KeyValue label="Volatilité annualisée" value={formatPercent(data.risk.volatility ?? 0, { sign: false })} />
@@ -142,7 +142,7 @@ export function AnalyticsPage() {
                   <KeyValue label="Levier (dette / actifs)" value={`${formatNumber(data.risk.leverage, 2)}×`} />
                 </div>
               </Card>
-              <Card title="Patrimoine de fin de période" subtitle="Dernier point connu de la série.">
+              <Card title="Patrimoine de fin de période" subtitle="Dernière valeur connue.">
                 <p className="big-number">{formatEur(data.monthly[data.monthly.length - 1]?.netWorth ?? 0, 0)}</p>
                 <p className="muted small">Mois analysé : {formatMonthLabel(data.monthly[data.monthly.length - 1]?.month ?? '')}</p>
               </Card>

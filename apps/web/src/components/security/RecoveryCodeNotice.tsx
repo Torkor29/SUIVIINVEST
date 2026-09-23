@@ -1,12 +1,13 @@
 import { useState } from 'react';
+import { IconKey } from '../ui/Icons.tsx';
 
 /**
  * Affichage UNIQUE d'un code de récupération.
  *
  * Le serveur ne conserve que l'empreinte SHA-256 du code : il est donc
  * impossible de le relire plus tard, ni depuis l'interface, ni depuis la base.
- * Cet écran est la seule occasion de le noter — d'où le bouton explicite qui
- * empêche de continuer sans avoir fait une action volontaire.
+ * Cet écran est la seule occasion de le noter — d'où la case à cocher qui
+ * empêche de continuer sans action volontaire.
  */
 export function RecoveryCodeNotice({
   code,
@@ -25,29 +26,29 @@ export function RecoveryCodeNotice({
       await navigator.clipboard.writeText(code);
       setCopied(true);
     } catch {
-      // Presse-papiers indisponible (contexte non sécurisé) : le code reste
-      // affiché, l'utilisateur le note à la main.
+      // Presse-papiers indisponible (page servie en HTTP) : le code reste affiché.
       setCopied(false);
     }
   };
 
   return (
     <>
-      <h1 className="login-title">Notez ce code de récupération</h1>
-      <p className="muted small">
-        Il permet de reprendre la main sur <strong>{subject}</strong> si le mot de passe est perdu,
-        sans e-mail et sans accès au serveur.
+      <span className="avatar avatar-lg" aria-hidden="true">
+        <IconKey size={28} />
+      </span>
+      <h1 className="login-title">Votre code de secours</h1>
+      <p className="login-lead">
+        Si vous oubliez le mot de passe de <strong>{subject}</strong>, ce code vous permettra d’en choisir un nouveau.
       </p>
-      <p className="feedback feedback-ok" data-testid="recovery-code-issued">
-        <code style={{ fontSize: '1.05rem', letterSpacing: '0.08em' }}>{code}</code>
-      </p>
-      <p className="muted small">
-        ⚠️ Il ne sera <strong>plus jamais affiché</strong> : le serveur n’en garde qu’une empreinte
-        irréversible. Rangez-le dans votre gestionnaire de mots de passe, à côté du mot de passe.
-      </p>
-      <button type="button" className="btn btn-ghost btn-block" onClick={() => void copy()}>
-        {copied ? 'Code copié ✓' : 'Copier le code'}
+      <code className="code-box" data-testid="recovery-code-issued">
+        {code}
+      </code>
+      <button type="button" className="btn btn-block" onClick={() => void copy()}>
+        {copied ? 'Copié ✓' : 'Copier le code'}
       </button>
+      <p className="notice notice-warn">
+        Il ne sera plus jamais affiché. Rangez-le dans votre gestionnaire de mots de passe ou notez-le sur papier.
+      </p>
       <label className="field field-inline">
         <input
           type="checkbox"
@@ -55,11 +56,11 @@ export function RecoveryCodeNotice({
           checked={acknowledged}
           onChange={(event) => setAcknowledged(event.target.checked)}
         />
-        <span>J’ai noté mon code de récupération</span>
+        <span>J’ai mis ce code en lieu sûr</span>
       </label>
       <button
         type="button"
-        className="btn btn-primary btn-block"
+        className="btn btn-primary btn-lg btn-block"
         data-testid="recovery-done"
         disabled={!acknowledged}
         onClick={onDone}

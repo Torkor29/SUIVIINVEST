@@ -1,8 +1,9 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth.tsx';
 import { AppShell } from './components/layout/AppShell.tsx';
-import { SkeletonLines } from './components/ui/Skeleton.tsx';
 import { LoginPage } from './pages/Login.tsx';
+import { ResetPasswordPage } from './pages/ResetPassword.tsx';
+import { ProfilePage } from './pages/Profile.tsx';
 import { DashboardPage } from './pages/Dashboard.tsx';
 import { InvestmentsPage } from './pages/Investments.tsx';
 import { CryptoPage } from './pages/Crypto.tsx';
@@ -15,7 +16,7 @@ import { ConnectionsPage } from './pages/Connections.tsx';
 import { SettingsPage } from './pages/Settings.tsx';
 import { NotFoundPage } from './pages/NotFound.tsx';
 
-/** Routes de l'application (dix sections + connexion). */
+/** Routes de l'application (sections + profil). */
 function RoutesTree() {
   return (
     <AppShell>
@@ -29,6 +30,7 @@ function RoutesTree() {
         <Route path="/revenus" element={<IncomePage />} />
         <Route path="/analyses" element={<AnalyticsPage />} />
         <Route path="/connexions" element={<ConnectionsPage />} />
+        <Route path="/profil" element={<ProfilePage />} />
         <Route path="/parametres" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
@@ -39,13 +41,23 @@ function RoutesTree() {
 /** Porte d'entrée : session authentifiée requise pour afficher les sections. */
 function Gate() {
   const { session, loading, error } = useAuth();
+  const location = useLocation();
+
+  // Lien reçu par e-mail : accessible sans session.
+  if (location.pathname === '/reinitialiser') return <ResetPasswordPage />;
 
   if (loading && session === null) {
     return (
       <div className="boot">
-        <SkeletonLines lines={4} />
-        <p className="muted small">Connexion à l’API SuiviInvest…</p>
-        {error !== null && <p className="feedback feedback-error">{error}</p>}
+        <div>
+          <span className="brand-mark boot-mark" aria-hidden="true">
+            S
+          </span>
+          <p className="muted small" style={{ marginTop: 16 }}>
+            Chargement…
+          </p>
+          {error !== null && <p className="feedback feedback-error">{error}</p>}
+        </div>
       </div>
     );
   }

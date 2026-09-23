@@ -51,7 +51,7 @@ export function IncomePage() {
     <>
       <PageHeader
         title="Revenus"
-        subtitle="Dividendes, coupons, intérêts d’épargne et loyers encaissés."
+        subtitle="Dividendes, intérêts et loyers encaissés."
         actions={<PeriodSelector value={period} onChange={setPeriod} compact />}
       />
       <AsyncView
@@ -72,7 +72,7 @@ export function IncomePage() {
           <>
             <Grid>
               <StatTile label={`Revenus — ${PERIOD_LABELS[period]}`} value={formatEur(data.total, 0)} hint={`${data.items.length} encaissements`} />
-              <StatTile label="Projection annuelle" value={formatEur(data.forwardAnnualized, 0)} hint="Sur la base du rythme observé" />
+              <StatTile label="Projection annuelle" value={formatEur(data.forwardAnnualized, 0)} hint="Au rythme actuel" />
               <StatTile
                 label="Moyenne mensuelle"
                 value={formatEur(data.byMonth.length === 0 ? 0 : data.total / data.byMonth.length, 0)}
@@ -97,7 +97,7 @@ export function IncomePage() {
                   <AllocationLegend slices={data.byType} />
                 </div>
               </Card>
-              <Card title="Par établissement" subtitle="Répartition des encaissements.">
+              <Card title="Par établissement" subtitle="Qui vous a versé quoi.">
                 <AllocationLegend slices={data.byProvider} />
                 <h3 className="sub-title">Par compte</h3>
                 <AllocationLegend slices={data.byAccount} />

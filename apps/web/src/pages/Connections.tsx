@@ -94,7 +94,7 @@ export function ConnectionsPage() {
     <>
       <PageHeader
         title="Connexions"
-        subtitle="Collecte des comptes, positions et transactions — toujours en lecture seule."
+        subtitle="Reliez vos banques, courtiers et wallets. Accès en lecture seule : rien ne peut être acheté, vendu ou viré."
         actions={
           <button
             type="button"
@@ -131,15 +131,15 @@ export function ConnectionsPage() {
               <StatTile
                 label="Opérationnelles"
                 value={`${data.connections.filter((connection) => connection.status === 'OK' || connection.status === 'CONNECTED' || connection.status === 'SYNCED').length}`}
-                hint="Statut renvoyé par le serveur"
+                hint="Sources qui répondent"
               />
               <StatTile
                 label="Action requise"
                 value={`${data.connections.filter((connection) => connection.needsReauth || connection.requiresUserAction).length}`}
-                hint="Validation ou jeton expiré"
+                hint="Validation ou reconnexion attendue"
               />
-              <StatTile label="Planificateur" value={data.scheduler.enabled ? 'Actif' : 'Inactif'} hint={data.scheduler.cron ?? 'aucune planification'} />
-              <StatTile label="Prochaine passe" value={data.scheduler.nextRunAt === null ? '—' : formatDate(data.scheduler.nextRunAt)} hint={`Dernière : ${formatDate(data.scheduler.lastRunAt)}`} />
+              <StatTile label="Synchro automatique" value={data.scheduler.enabled ? 'Actif' : 'Inactif'} hint={data.scheduler.enabled ? 'Vos sources se mettent à jour seules' : 'Désactivée'} />
+              <StatTile label="Prochaine synchro" value={data.scheduler.nextRunAt === null ? '—' : formatDate(data.scheduler.nextRunAt)} hint={`Dernière : ${formatDate(data.scheduler.lastRunAt)}`} />
             </Grid>
 
             <div className="conn-grid">
@@ -174,7 +174,7 @@ export function ConnectionsPage() {
 
             <WalletsPanel />
 
-            <Card title="Établissements pris en charge" subtitle="Ce que chaque connecteur sait collecter." padded={false}>
+            <Card title="Établissements pris en charge" subtitle="Ce que chaque source permet de récupérer." padded={false}>
               <DataTable rows={data.providers} columns={providerColumns} rowKey={(row) => row.providerId} />
             </Card>
 

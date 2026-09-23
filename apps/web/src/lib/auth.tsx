@@ -8,8 +8,15 @@ export interface AuthContextValue {
   readonly error: string | null;
   readonly refresh: () => void;
   readonly login: (password: string, username?: string | null) => Promise<void>;
-  readonly setup: (password: string, username?: string | null) => Promise<{ recoveryCode: string }>;
+  readonly setup: (input: SetupInput) => Promise<{ recoveryCode: string }>;
   readonly logout: () => Promise<void>;
+}
+
+export interface SetupInput {
+  readonly password: string;
+  readonly username?: string | null;
+  readonly displayName?: string | null;
+  readonly email?: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -57,10 +64,15 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
    * définitivement perdu.
    */
   const setup = useCallback(
-    async (password: string, username?: string | null): Promise<{ recoveryCode: string }> => {
+    async (input: SetupInput): Promise<{ recoveryCode: string }> => {
       const result = await request<SessionResponse & { recoveryCode: string }>('/api/auth/setup', {
         method: 'POST',
-        json: { password, ...(username ? { username } : {}) },
+        json: {
+          password: input.password,
+          ...(input.username ? { username: input.username } : {}),
+          ...(input.displayName ? { displayName: input.displayName } : {}),
+          ...(input.email ? { email: input.email } : {}),
+        },
       });
       if (result.csrfToken !== null) setCsrfToken(result.csrfToken);
       return { recoveryCode: result.recoveryCode };

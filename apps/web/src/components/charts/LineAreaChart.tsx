@@ -9,6 +9,10 @@ export interface LineAreaChartProps {
   /** Nombre maximum de points dessinés (échantillonnage automatique). */
   readonly maxPoints?: number;
   readonly ariaLabel?: string;
+  /** Couleur de la courbe : hausse (vert), baisse (rouge) ou neutre. */
+  readonly tone?: 'up' | 'down' | 'flat';
+  /** Sans graduations ni libellés d'axe (courbe « héros » du tableau de bord). */
+  readonly minimal?: boolean;
 }
 
 const WIDTH = 720;
@@ -17,7 +21,14 @@ const WIDTH = 720;
  * Courbe d'évolution du patrimoine : aire + ligne, graduations et infobulle au survol.
  * Tout est dessiné à la main en SVG (aucune librairie de graphiques).
  */
-export function LineAreaChart({ points, height = 260, maxPoints = 320, ariaLabel = 'Évolution du patrimoine' }: LineAreaChartProps) {
+export function LineAreaChart({
+  points,
+  height = 260,
+  maxPoints = 320,
+  ariaLabel = 'Évolution du patrimoine',
+  tone = 'flat',
+  minimal = false,
+}: LineAreaChartProps) {
   const gradientId = useId();
   const [hover, setHover] = useState<number>(-1);
   const sampled = useMemo(() => downsample(points, maxPoints), [points, maxPoints]);
@@ -53,7 +64,7 @@ export function LineAreaChart({ points, height = 260, maxPoints = 320, ariaLabel
   };
 
   return (
-    <div className="chart-line">
+    <div className={`chart-line is-${tone}`}>
       <svg
         className="chart-svg"
         viewBox={`0 0 ${WIDTH} ${height}`}
@@ -69,7 +80,7 @@ export function LineAreaChart({ points, height = 260, maxPoints = 320, ariaLabel
             <stop offset="100%" className="chart-fill-bottom" />
           </linearGradient>
         </defs>
-        {tickPoints.map((tick) => (
+        {!minimal && tickPoints.map((tick) => (
           <g key={tick.value}>
             <line className="chart-grid" x1={0} x2={WIDTH} y1={tick.y} y2={tick.y} />
             <text className="chart-axis-label" x={WIDTH - 2} y={tick.y - 4} textAnchor="end">

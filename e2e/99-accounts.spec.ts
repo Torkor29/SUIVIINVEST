@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { E2E_PASSWORD, acknowledgeRecoveryCode, gotoSection } from './helpers.ts';
+import { E2E_OWNER, E2E_PASSWORD, acknowledgeRecoveryCode, gotoSection } from './helpers.ts';
 
 /**
  * Comptes et récupération d'accès — parcours complets dans un vrai navigateur.
@@ -15,7 +15,7 @@ import { E2E_PASSWORD, acknowledgeRecoveryCode, gotoSection } from './helpers.ts
  */
 const MEMBER = { username: 'invite', password: 'MotDePasse-Invite-2026' };
 const MEMBER_NEW_PASSWORD = 'MotDePasse-Invite-Revisite-2026';
-const OWNER_USERNAME = 'proprietaire';
+const OWNER_USERNAME = E2E_OWNER.username;
 const OWNER_NEW_PASSWORD = 'MotDePasse-Reinitialise-2026';
 
 /**
@@ -35,100 +35,107 @@ async function freshPage(browser: Browser): Promise<{ page: Page; close: () => P
   return { page: await context.newPage(), close: () => context.close() };
 }
 
-/** Connexion, avec identifiant ou sans (selon l'état des comptes). */
-async function signIn(page: Page, password: string, username?: string): Promise<void> {
+/** Connexion par identifiant (ou e-mail) et mot de passe. */
+async function signIn(page: Page, password: string, identifier: string = OWNER_USERNAME): Promise<void> {
   await page.goto('/');
-  if (username !== undefined) {
-    await page.getByRole('textbox', { name: /Identifiant/i }).fill(username);
-  }
-  await page.locator('input[type="password"]').fill(password);
-  await page.getByRole('button', { name: 'Entrer' }).click();
+  await page.getByRole('textbox', { name: /Identifiant ou e-mail/i }).fill(identifier);
+  await page.getByTestId('login-password').fill(password);
+  await page.getByRole('button', { name: 'Se connecter' }).click();
 }
 
-test('déconnexion explicite, puis reconnexion (un seul compte, sans identifiant)', async ({
-  browser,
-}) => {
+test('déconnexion explicite, puis reconnexion par identifiant et par e-mail', async ({ browser }) => {
   const { page, close } = await freshPage(browser);
   try {
     await signIn(page, E2E_PASSWORD);
     await expect(page.locator('.hero-label')).toHaveText('Patrimoine net');
 
     await page.getByTestId('logout').click();
-    await expect(page.getByRole('heading', { name: /Déverrouiller vos données/i })).toBeVisible();
-    // Un seul compte, sans identifiant : le champ identifiant n'est pas demandé.
-    await expect(page.getByRole('textbox', { name: /Identifiant/i })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: /Bon retour/i })).toBeVisible();
+    // La session est bien fermée côté serveur, pas seulement à l'écran.
+    const session = (await (await page.request.get('/api/auth/session')).json()) as { authenticated: boolean };
+    expect(session.authenticated).toBe(false);
 
-    await signIn(page, E2E_PASSWORD);
+    // L'adresse e-mail (stockée chiffrée) permet aussi de se connecter.
+    await signIn(page, E2E_PASSWORD, E2E_OWNER.email.toUpperCase());
     await expect(page.locator('.hero-label')).toHaveText('Patrimoine net');
   } finally {
     await close();
   }
 });
 
-test('le propriétaire crée un second compte et reçoit son code de récupération', async ({
-  browser,
-}) => {
+test('profil : nom et e-mail modifiables, appareils connectés listés', async ({ browser }) => {
   const { page, close } = await freshPage(browser);
   try {
     await signIn(page, E2E_PASSWORD);
-    await gotoSection(page, 'Paramètres');
+    await gotoSection(page, 'Profil');
 
-    await expect(page.getByTestId('account-owner')).toBeVisible();
+    await expect(page.getByTestId('profile-email')).toHaveValue(E2E_OWNER.email);
+    await page.getByTestId('profile-display-name').fill('Julie P.');
+    await page.getByTestId('profile-save').click();
+    await expect(page.getByTestId('profile-name')).toHaveText('Julie P.');
+    await expect(page.locator('.account-chip')).toContainText('Julie P.');
+
+    await expect(page.getByTestId('devices')).toContainText('Cet appareil');
+
+    // On remet le nom d'origine pour les parcours suivants.
+    await page.getByTestId('profile-display-name').fill(E2E_OWNER.displayName);
+    await page.getByTestId('profile-save').click();
+    await expect(page.getByTestId('profile-name')).toHaveText(E2E_OWNER.displayName);
+  } finally {
+    await close();
+  }
+});
+
+test('le propriétaire crée un second compte et reçoit son code de secours', async ({ browser }) => {
+  const { page, close } = await freshPage(browser);
+  try {
+    await signIn(page, E2E_PASSWORD);
+    await gotoSection(page, 'Profil');
+
+    await expect(page.getByTestId(`account-${OWNER_USERNAME}`)).toBeVisible();
     await page.getByTestId('new-account-username').fill(MEMBER.username);
     await page.getByTestId('new-account-password').fill(MEMBER.password);
-    // Le propriétaire n'avait pas d'identifiant : il doit en donner un, sinon il
-    // ne pourrait plus se connecter dès que ce second compte existera.
-    await expect(page.getByTestId('owner-username')).toBeVisible();
-    await page.getByTestId('owner-username').fill(OWNER_USERNAME);
+    // Le propriétaire a déjà un identifiant : rien d'autre n'est demandé.
+    await expect(page.getByTestId('owner-username')).toHaveCount(0);
     await page.getByTestId('create-account').click();
 
     const code = await acknowledgeRecoveryCode(page);
     expect(code).toMatch(/^[A-Z0-9]{4}(-[A-Z0-9]{4}){4}$/);
 
-    // Le compte apparaît, les deux identifiants sont listés, et aucun mot de
-    // passe n'est jamais affiché.
+    // Le compte apparaît, et aucun mot de passe n'est jamais affiché.
     await expect(page.getByTestId(`account-${MEMBER.username}`)).toBeVisible();
     await expect(page.getByTestId(`account-${OWNER_USERNAME}`)).toBeVisible();
-    await expect(page.getByText(/argon2id/i).first()).toBeVisible();
     await expect(page.locator('body')).not.toContainText(MEMBER.password);
   } finally {
     await close();
   }
 });
 
-test('avec deux comptes, la connexion exige l’identifiant', async ({ browser }) => {
+test('avec deux comptes, chacun se connecte avec son identifiant', async ({ browser }) => {
   const { page, close } = await freshPage(browser);
   try {
-    await page.goto('/');
-    const usernameField = page.getByRole('textbox', { name: /Identifiant/i });
-    await expect(usernameField).toBeVisible();
-
     // Mauvais identifiant : message générique, aucune fuite sur les comptes.
     await signIn(page, 'peu-importe-2026', 'inconnu');
-    await expect(page.locator('.feedback-error')).toContainText(
-      'Identifiant ou mot de passe incorrect',
-    );
+    await expect(page.locator('.feedback-error')).toContainText('Identifiant ou mot de passe incorrect');
 
     // Le membre se connecte et voit le MÊME patrimoine (données non cloisonnées).
     await signIn(page, MEMBER.password, MEMBER.username);
     await expect(page.locator('.hero-label')).toHaveText('Patrimoine net');
 
     // Un membre n'a pas la gestion des comptes, mais peut changer son mot de passe.
-    await gotoSection(page, 'Paramètres');
-    await expect(page.getByTestId('create-account')).toHaveCount(0);
+    await gotoSection(page, 'Profil');
     await expect(page.getByTestId('change-password')).toBeVisible();
+    await expect(page.getByTestId('create-account')).toHaveCount(0);
   } finally {
     await close();
   }
 });
 
-test('changement de mot de passe : l’ancien est exigé et les sessions tombent', async ({
-  browser,
-}) => {
+test('changement de mot de passe : l’ancien est exigé et les sessions tombent', async ({ browser }) => {
   const { page, close } = await freshPage(browser);
   try {
     await signIn(page, MEMBER.password, MEMBER.username);
-    await gotoSection(page, 'Paramètres');
+    await gotoSection(page, 'Profil');
 
     // Ancien mot de passe faux : refus explicite.
     await page.getByTestId('current-password').fill('ce-n-est-pas-le-bon');
@@ -145,18 +152,15 @@ test('changement de mot de passe : l’ancien est exigé et les sessions tombent
     // La session a été révoquée : l'ancien mot de passe ne vaut plus rien,
     // le nouveau ouvre la session.
     await signIn(page, MEMBER.password, MEMBER.username);
-    await expect(page.locator('.feedback-error')).toContainText(
-      'Identifiant ou mot de passe incorrect',
-    );
-    await page.locator('input[type="password"]').fill(MEMBER_NEW_PASSWORD);
-    await page.getByRole('button', { name: 'Entrer' }).click();
+    await expect(page.locator('.feedback-error')).toContainText('Identifiant ou mot de passe incorrect');
+    await signIn(page, MEMBER_NEW_PASSWORD, MEMBER.username);
     await expect(page.locator('.hero-label')).toHaveText('Patrimoine net');
   } finally {
     await close();
   }
 });
 
-test('mot de passe oublié : le code de récupération rouvre le compte', async ({ browser }) => {
+test('mot de passe oublié : le code de secours rouvre le compte', async ({ browser }) => {
   const { page, close } = await freshPage(browser);
   try {
     // Code du propriétaire, remis une seule fois au premier lancement : le
@@ -178,9 +182,7 @@ test('mot de passe oublié : le code de récupération rouvre le compte', async 
     await page.getByTestId('recovery-new-password').fill(OWNER_NEW_PASSWORD);
     await page.getByTestId('recovery-confirm-password').fill(OWNER_NEW_PASSWORD);
     await page.getByRole('button', { name: /Définir le nouveau mot de passe/i }).click();
-    await expect(page.locator('.feedback-error')).toContainText(
-      'Code de récupération invalide pour ce compte',
-    );
+    await expect(page.locator('.feedback-error')).toContainText('Code de récupération invalide pour ce compte');
 
     // Avec le vrai code : accès rendu et nouveau code émis.
     await page.getByTestId('recovery-code').fill(ownerCode);
@@ -194,5 +196,38 @@ test('mot de passe oublié : le code de récupération rouvre le compte', async 
     await expect(page.locator('.hero-label')).toHaveText('Patrimoine net');
   } finally {
     await close();
+  }
+});
+
+test('un lien de réinitialisation invalide est refusé proprement', async ({ browser }) => {
+  const { page, close } = await freshPage(browser);
+  try {
+    await page.goto('/reinitialiser?token=jeton-invalide-0000000000');
+    await expect(page.getByRole('heading', { name: /Lien expiré/i })).toBeVisible();
+  } finally {
+    await close();
+  }
+});
+
+test('sur téléphone : barre d’onglets et menu « Plus » avec déconnexion', async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    locale: 'fr-FR',
+    storageState: { cookies: [], origins: [] },
+  });
+  const page = await context.newPage();
+  try {
+    await signIn(page, OWNER_NEW_PASSWORD, OWNER_USERNAME);
+    await expect(page.locator('.hero-label')).toHaveText('Patrimoine net');
+    const tabs = page.getByRole('navigation', { name: 'Onglets' });
+    await expect(tabs).toBeVisible();
+    await tabs.getByRole('link', { name: 'Crypto' }).click();
+    await expect(page.locator('.page-title')).toHaveText('Crypto');
+
+    await tabs.getByRole('button', { name: 'Plus de sections' }).click();
+    await page.getByTestId('logout').click();
+    await expect(page.getByRole('heading', { name: /Bon retour/i })).toBeVisible();
+  } finally {
+    await context.close();
   }
 });

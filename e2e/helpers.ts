@@ -3,6 +3,9 @@ import { expect, type APIResponse, type Page } from '@playwright/test';
 /** Mot de passe du premier lancement (base temporaire, jamais réutilisé ailleurs). */
 export const E2E_PASSWORD = 'mot-de-passe-e2e-2026';
 
+/** Compte propriétaire créé au premier lancement. */
+export const E2E_OWNER = { username: 'proprietaire', displayName: 'Julie Propriétaire', email: 'julie@exemple.fr' };
+
 /** Adresse publique factice utilisée pour le wallet de test. */
 export const E2E_WALLET_ADDRESS = '0xe2e0000000000000000000000000000000000001';
 
@@ -17,14 +20,22 @@ export const E2E_WALLET_ADDRESS = '0xe2e0000000000000000000000000000000000001';
  */
 export async function createPasswordThroughUi(page: Page, password = E2E_PASSWORD): Promise<void> {
   await page.goto('/');
-  const field = page.locator('input[type="password"]');
-  await expect(field).toBeVisible();
-  await field.fill(password);
-  await page.getByRole('button', { name: /Créer le compte/i }).click();
-  // Écran « Notez ce code de récupération » : le code est affiché une seule fois.
+  await fillSetupForm(page, password);
+  // Écran « Votre code de secours » : le code est affiché une seule fois.
   await acknowledgeRecoveryCode(page);
   // Le tableau de bord n'apparaît qu'une fois la session ouverte.
-  await expect(page.getByRole('link', { name: 'Tableau de bord' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Accueil', exact: true })).toBeVisible();
+}
+
+/** Remplit le formulaire « Créez votre compte » et le valide. */
+export async function fillSetupForm(page: Page, password = E2E_PASSWORD): Promise<void> {
+  await expect(page.getByRole('heading', { name: /Créez votre compte/i })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Prénom ou nom' }).fill(E2E_OWNER.displayName);
+  await page.getByRole('textbox', { name: 'Identifiant' }).fill(E2E_OWNER.username);
+  await page.getByRole('textbox', { name: /E-mail/ }).fill(E2E_OWNER.email);
+  await page.getByTestId('setup-password').fill(password);
+  await page.getByTestId('setup-confirm').fill(password);
+  await page.getByRole('button', { name: 'Créer mon compte' }).click();
 }
 
 /**
@@ -42,7 +53,7 @@ export async function acknowledgeRecoveryCode(page: Page): Promise<string> {
 
 /** Navigation par la barre latérale, comme un utilisateur. */
 export async function gotoSection(page: Page, label: string): Promise<void> {
-  await page.getByRole('link', { name: label }).click();
+  await page.getByRole('link', { name: label, exact: true }).click();
   await expect(page.locator('.page-title')).toHaveText(label);
 }
 

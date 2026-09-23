@@ -6,10 +6,10 @@ export function NotFoundPage() {
   return (
     <EmptyState
       title="Page introuvable"
-      hint="Le lien demandé n’existe pas (ou plus). Revenez au tableau de bord pour retrouver vos chiffres."
+      hint="Ce lien n’existe pas ou plus. Revenez à l’accueil pour retrouver vos chiffres."
       action={
         <Link className="btn btn-primary" to="/">
-          Retour au tableau de bord
+          Retour à l’accueil
         </Link>
       }
     />

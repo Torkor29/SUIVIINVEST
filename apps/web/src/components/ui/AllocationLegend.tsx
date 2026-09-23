@@ -18,7 +18,7 @@ export function AllocationLegend({ slices, colorByLabel = false, maxItems = 8, s
       {visible.map((slice, index) => {
         const color = colorByLabel ? classColor(slice.label) : sliceColor(index);
         return (
-          <li key={slice.key} className="alloc-item">
+          <li key={slice.key} className={showBars ? 'alloc-item' : 'alloc-item no-bar'}>
             <span className="alloc-dot" style={{ background: color }} aria-hidden="true" />
             <span className="alloc-label">{slice.label}</span>
             {showBars && (

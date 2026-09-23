@@ -21,6 +21,8 @@ import type {
 export interface SourceDefinition {
   readonly providerId: string;
   readonly providerName: string;
+  /** Aucun accès automatique possible : import de relevés uniquement. */
+  readonly importOnly?: boolean;
 }
 
 /** Ordre d'affichage imposé de l'interface : une carte par source connue. */
@@ -28,8 +30,8 @@ export const SOURCE_ORDER: readonly SourceDefinition[] = [
   { providerId: 'metamask', providerName: 'MetaMask' },
   { providerId: 'degiro', providerName: 'DEGIRO' },
   { providerId: 'trade_republic', providerName: 'Trade Republic' },
-  { providerId: 'credit_agricole', providerName: 'Crédit Agricole' },
-  { providerId: 'revolut', providerName: 'Revolut' },
+  { providerId: 'credit_agricole', providerName: 'Crédit Agricole', importOnly: true },
+  { providerId: 'revolut', providerName: 'Revolut', importOnly: true },
 ];
 
 export type ConnectionStateKey =

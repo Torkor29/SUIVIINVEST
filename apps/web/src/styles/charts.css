@@ -6,7 +6,16 @@
 }
 
 .chart-line {
+  --chart-color: var(--text);
   position: relative;
+}
+
+.chart-line.is-up {
+  --chart-color: var(--pos);
+}
+
+.chart-line.is-down {
+  --chart-color: var(--neg);
 }
 
 .chart-area {
@@ -14,18 +23,18 @@
 }
 
 .chart-fill-top {
-  stop-color: var(--accent);
-  stop-opacity: 0.28;
+  stop-color: var(--chart-color);
+  stop-opacity: 0.16;
 }
 
 .chart-fill-bottom {
-  stop-color: var(--accent);
+  stop-color: var(--chart-color);
   stop-opacity: 0;
 }
 
 .chart-line-path {
-  stroke: var(--accent);
-  stroke-width: 2;
+  stroke: var(--chart-color);
+  stroke-width: 2.2;
   stroke-linejoin: round;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
@@ -33,6 +42,7 @@
 
 .chart-grid {
   stroke: var(--border);
+  stroke-dasharray: 2 4;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
@@ -50,8 +60,8 @@
 }
 
 .chart-dot {
-  fill: var(--surface);
-  stroke: var(--accent);
+  fill: var(--bg);
+  stroke: var(--chart-color);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
@@ -72,9 +82,8 @@
   flex-direction: column;
   gap: 2px;
   padding: 7px 11px;
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  background: var(--elevated);
   box-shadow: var(--shadow);
   font-size: 12.5px;
   pointer-events: none;
@@ -91,7 +100,7 @@
 }
 
 .chart-empty {
-  padding: 28px;
+  padding: 40px 28px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--muted);

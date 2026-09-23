@@ -51,8 +51,8 @@ export function CashPage() {
   return (
     <>
       <PageHeader
-        title="Trésorerie & banques"
-        subtitle="Comptes courants, épargne réglementée et comptes en devises."
+        title="Banque"
+        subtitle="Comptes courants, livrets et comptes en devises."
         actions={<Badge tone="info">Collecte en lecture seule</Badge>}
       />
       <AsyncView
@@ -61,7 +61,7 @@ export function CashPage() {
         data={state.data}
         onRetry={state.reload}
         empty={(data) => data.accounts.length === 0}
-        emptyState={<EmptyState title="Aucun compte" hint="Rattachez un établissement dans la section Connexions." />}
+        emptyState={<EmptyState title="Aucun compte" hint="Ajoutez votre banque dans Connexions ou importez un relevé." />}
         skeleton={
           <>
             <SkeletonTiles count={4} />
@@ -76,7 +76,7 @@ export function CashPage() {
           return (
             <>
               <Grid>
-                <StatTile label="Trésorerie disponible" value={formatEur(totalCash, 0)} hint={`${cashAccounts.length} compte(s)`} />
+                <StatTile label="Liquidités disponibles" value={formatEur(totalCash, 0)} hint={`${cashAccounts.length} compte(s)`} />
                 <StatTile label="Comptes courants" value={formatEur(cashAccounts.filter((a) => a.type === 'CASH').reduce((s, a) => s + a.value, 0), 0)} />
                 <StatTile label="Épargne" value={formatEur(cashAccounts.filter((a) => a.type === 'SAVINGS').reduce((s, a) => s + a.value, 0), 0)} />
                 <StatTile
@@ -87,7 +87,7 @@ export function CashPage() {
               </Grid>
 
               <Grid className="grid-2">
-                <Card title="Soldes par compte" subtitle="Vue immédiate des liquidités par établissement.">
+                <Card title="Soldes par compte" subtitle="Vos liquidités, banque par banque.">
                   <BarChart
                     items={cashAccounts.map((account) => ({ label: account.name, value: account.value }))}
                     ariaLabel="Soldes par compte"
@@ -101,7 +101,7 @@ export function CashPage() {
                 </Card>
               </Grid>
 
-              <Card title="Comptes" subtitle="Solde en euros, devise d’origine conservée si différente." padded={false}>
+              <Card title="Comptes" subtitle="Solde en euros ; la devise d’origine est indiquée quand elle diffère." padded={false}>
                 <DataTable rows={cashAccounts} columns={columns} rowKey={(row) => row.id} initialSortKey="value" />
               </Card>
 

@@ -78,9 +78,9 @@ export function TransactionsPage() {
 
   return (
     <>
-      <PageHeader title="Transactions" subtitle="Historique consolidé, importé des établissements ou de vos relevés CSV." />
+      <PageHeader title="Activité" subtitle="Toutes vos opérations, tous comptes confondus." />
 
-      <Card title="Filtres" subtitle="Les filtres se cumulent ; les montants sont exprimés en euros.">
+      <Card title="Filtres" subtitle="Les filtres se cumulent. Montants en euros.">
         <TransactionFilters
           values={filters}
           accounts={accounts.data?.accounts ?? []}
@@ -107,7 +107,7 @@ export function TransactionsPage() {
         {(data) => (
           <>
             <Grid>
-              <StatTile label="Transactions correspondantes" value={`${data.total}`} hint={`Page de ${PAGE_SIZE} lignes`} />
+              <StatTile label="Opérations trouvées" value={`${data.total}`} hint={`Page de ${PAGE_SIZE} lignes`} />
               <StatTile
                 label="Total des montants"
                 value={formatEur(data.items.reduce((sum, item) => sum + item.amountEur, 0), 0)}
@@ -116,11 +116,11 @@ export function TransactionsPage() {
               <StatTile
                 label="Frais de la page"
                 value={formatEur(data.items.reduce((sum, item) => sum + item.fees, 0))}
-                hint="Courtage, gestion"
+                hint="Courtage et gestion"
               />
             </Grid>
 
-            <Card title="Répartition par type" subtitle="Montants absolus des transactions filtrées.">
+            <Card title="Répartition par type" subtitle="Volume des opérations filtrées.">
               <AllocationLegend slices={data.totalsByType} />
             </Card>
 

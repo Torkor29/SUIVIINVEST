@@ -78,3 +78,24 @@ test('formatUptime résume une disponibilité serveur', () => {
   assert.equal(formatUptime(120), '2 min');
   assert.equal(formatUptime(null), '—');
 });
+
+test('formatRelative : durées lisibles', async () => {
+  const { formatRelative } = await import('../src/lib/format.ts');
+  const now = new Date('2026-09-23T12:00:00Z');
+  assert.equal(formatRelative('2026-09-23T11:59:30Z', now), 'à l’instant');
+  assert.equal(formatRelative('2026-09-23T11:55:00Z', now), 'il y a 5 min');
+  assert.equal(formatRelative('2026-09-23T09:00:00Z', now), 'il y a 3 h');
+  assert.equal(formatRelative('2026-09-22T10:00:00Z', now), 'hier');
+  assert.equal(formatRelative('2026-09-19T10:00:00Z', now), 'il y a 4 jours');
+  assert.equal(formatRelative('2026-09-01T10:00:00Z', now), 'le 1 sept. 2026');
+  assert.equal(formatRelative(null, now), '—');
+});
+
+test('initialsOf : initiales pour les avatars', async () => {
+  const { initialsOf } = await import('../src/lib/initials.ts');
+  assert.equal(initialsOf('Julie Martin'), 'JM');
+  assert.equal(initialsOf('julie.martin'), 'JM');
+  assert.equal(initialsOf('julie'), 'JU');
+  assert.equal(initialsOf(''), '•');
+  assert.equal(initialsOf(null), '•');
+});

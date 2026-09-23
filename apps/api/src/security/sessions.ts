@@ -191,13 +191,14 @@ export class AuthService {
     const now = new Date().toISOString();
     this.#db.run(
       `INSERT INTO users (id, username, display_name, role, password_hash, recovery_hash,
-                          created_at, updated_at, password_changed_at)
-       VALUES (?, ?, ?, 'OWNER', ?, ?, ?, ?, ?)`,
+                          created_at, updated_at, password_changed_at, last_login_at)
+       VALUES (?, ?, ?, 'OWNER', ?, ?, ?, ?, ?, ?)`,
       'owner',
       username,
       options.displayName ?? null,
       passwordHash,
       hashRecoveryCode(recoveryCode),
+      now,
       now,
       now,
       now,

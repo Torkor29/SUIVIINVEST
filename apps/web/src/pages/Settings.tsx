@@ -1,20 +1,26 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { HealthResponse, MarketDataRefreshResponse, SettingsDto } from '@suiviinvest/api-contract';
 import { isMockEnabled, request, setMockEnabled } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import { useAction } from '../lib/useAction.ts';
 import { ActionFeedback } from '../components/ui/ActionFeedback.tsx';
-import { formatDate, formatUptime } from '../lib/format.ts';
+import { formatDate, formatRelative, formatUptime } from '../lib/format.ts';
 import { useTheme } from '../lib/useTheme.ts';
 import type { ThemeChoice } from '../lib/theme.ts';
 import { PageHeader, Card, Grid } from '../components/ui/Card.tsx';
 import { AsyncView } from '../components/ui/AsyncView.tsx';
 import { SkeletonLines } from '../components/ui/Skeleton.tsx';
-import { StatTile, KeyValue, Badge } from '../components/ui/Stat.tsx';
-import { ReadOnlyNote } from '../components/ui/AllocationLegend.tsx';
-import { AccountsPanel } from '../components/security/AccountsPanel.tsx';
+import { KeyValue, Badge } from '../components/ui/Stat.tsx';
+import { IconCheck, IconShield } from '../components/ui/Icons.tsx';
 
-/** Paramètres : thème, données de marché, sauvegardes, sécurité et santé du serveur. */
+const THEMES: readonly { readonly value: ThemeChoice; readonly label: string }[] = [
+  { value: 'system', label: 'Automatique' },
+  { value: 'light', label: 'Clair' },
+  { value: 'dark', label: 'Sombre' },
+];
+
+/** Paramètres : apparence, cours de bourse, sauvegardes, sécurité et état du serveur. */
 export function SettingsPage() {
   const theme = useTheme();
   const [mock, setMock] = useState<boolean>(() => isMockEnabled());
@@ -25,36 +31,40 @@ export function SettingsPage() {
 
   const changeTheme = (choice: ThemeChoice): void => {
     theme.setChoice(choice);
-    void request<SettingsDto>('/api/settings', { method: 'PATCH', json: { theme: choice } })
-      .then(() => state.reload())
-      .catch(() => undefined);
+    void request<SettingsDto>('/api/settings', { method: 'PATCH', json: { theme: choice } }).catch(() => undefined);
   };
 
   return (
     <>
-      <PageHeader title="Paramètres" subtitle="Réglages de l’application, données de marché et sauvegardes." />
+      <PageHeader title="Paramètres" subtitle="Apparence, cours de bourse, sauvegardes et sécurité de votre serveur." />
 
-      <AsyncView loading={state.loading} error={state.error} data={state.data} onRetry={state.reload} skeleton={<SkeletonLines lines={6} />}>
+      <AsyncView
+        loading={state.loading}
+        error={state.error}
+        data={state.data}
+        onRetry={state.reload}
+        skeleton={<SkeletonLines lines={6} />}
+      >
         {(settings) => (
           <>
-            <Grid>
-              <StatTile label="Version" value={settings.version} hint={`Base ${settings.databasePath}`} />
-              <StatTile label="Devise de référence" value={settings.baseCurrency} hint="Toutes les contre-valeurs sont converties dans cette devise" />
-              <StatTile label="Session" value={`${settings.security.sessionTtlMinutes} min`} hint={settings.security.argon2Params} />
-              <StatTile label="Planificateur" value={settings.scheduler.enabled ? 'Actif' : 'Inactif'} hint={settings.scheduler.cron} />
-            </Grid>
-
             <Grid className="grid-2">
-              <Card title="Apparence" subtitle="Le thème est mémorisé et appliqué immédiatement.">
-                <label className="field">
-                  <span className="field-label">Thème</span>
-                  <select className="input" value={theme.choice} onChange={(event) => changeTheme(event.target.value as ThemeChoice)}>
-                    <option value="system">Système</option>
-                    <option value="light">Clair</option>
-                    <option value="dark">Sombre</option>
-                  </select>
-                </label>
-                <p className="muted small">Paramètre enregistré côté serveur : {settings.theme}.</p>
+              <Card title="Apparence">
+                <div className="segmented" role="group" aria-label="Thème">
+                  {THEMES.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      className={theme.choice === item.value ? 'segmented-btn is-active' : 'segmented-btn'}
+                      aria-pressed={theme.choice === item.value}
+                      onClick={() => changeTheme(item.value)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="muted small" style={{ marginTop: 10 }}>
+                  « Automatique » suit le réglage clair / sombre de votre appareil.
+                </p>
                 <label className="field field-inline">
                   <input
                     type="checkbox"
@@ -65,12 +75,12 @@ export function SettingsPage() {
                       setMockEnabled(enabled);
                     }}
                   />
-                  <span>Mode maquette (données de démonstration locales, sans API)</span>
+                  <span>Mode démo (données fictives, sans serveur)</span>
                 </label>
-                <p className="muted small">Le changement prend effet au prochain chargement de page (drapeau runtime, sans reconstruction).</p>
+                <p className="muted small">Prend effet au prochain rechargement de la page.</p>
               </Card>
 
-              <Card title="Données de marché" subtitle="Cotisations et taux de change.">
+              <Card title="Cours de bourse" subtitle="Les cours et taux de change sont mis à jour à chaque synchronisation.">
                 <div className="chips">
                   {settings.marketDataProviders.map((provider) => (
                     <Badge key={provider} tone="neutral">
@@ -85,75 +95,121 @@ export function SettingsPage() {
                     disabled={refresh.pending}
                     onClick={() =>
                       void refresh.run(async () => {
-                        const result = await request<MarketDataRefreshResponse>('/api/market-data/refresh', { method: 'POST' });
+                        const result = await request<MarketDataRefreshResponse>('/api/market-data/refresh', {
+                          method: 'POST',
+                        });
                         return result.message;
                       })
                     }
                   >
-                    {refresh.pending ? 'Actualisation…' : 'Actualiser les cotations'}
+                    {refresh.pending ? 'Actualisation…' : 'Actualiser les cours'}
                   </button>
                 </div>
                 <ActionFeedback state={refresh} />
               </Card>
 
-              <Card title="Sauvegardes" subtitle="Export de la base et rétention.">
+              <Card title="Sauvegardes" subtitle="Une copie complète de vos données, chaque nuit, sur votre serveur.">
                 <div className="kv-grid">
-                  <KeyValue label="Sauvegarde automatique" value={settings.backup.enabled ? 'Active' : 'Désactivée'} />
-                  <KeyValue label="Planification" value={settings.backup.cron ?? '—'} />
-                  <KeyValue label="Dernière sauvegarde" value={formatDate(settings.backup.lastBackupAt)} />
-                  <KeyValue label="Rétention" value={`${settings.backup.retentionDays} jours`} />
-                  <KeyValue label="Répertoire" value={settings.backup.directory} />
+                  <KeyValue label="Sauvegarde automatique" value={settings.backup.enabled ? 'Activée' : 'Désactivée'} />
+                  <KeyValue
+                    label="Dernière sauvegarde"
+                    value={settings.backup.lastBackupAt === null ? 'Aucune' : formatRelative(settings.backup.lastBackupAt)}
+                  />
+                  <KeyValue label="Conservation" value={`${settings.backup.retentionDays} jours`} />
+                  <KeyValue
+                    label="Chiffrement"
+                    value={settings.security.backupsEncrypted === true ? 'Chiffrées (AES-256)' : 'Non chiffrées'}
+                    tone={settings.security.backupsEncrypted === true ? 'up' : 'down'}
+                  />
                 </div>
                 <div className="card-actions-row">
                   <button
                     type="button"
-                    className="btn btn-ghost"
+                    className="btn"
                     disabled={backup.pending}
                     onClick={() =>
                       void backup.run(async () => {
                         await request<unknown>('/api/backup/export', { method: 'POST' });
-                        return 'Export de sauvegarde déclenché.';
+                        return 'Sauvegarde créée sur le serveur.';
                       })
                     }
                   >
-                    {backup.pending ? 'Export…' : 'Exporter la base'}
+                    {backup.pending ? 'Sauvegarde…' : 'Sauvegarder maintenant'}
                   </button>
                 </div>
                 <ActionFeedback state={backup} />
               </Card>
 
-              <Card title="Sécurité" subtitle="Ce qui protège vos données."
-              >
-                <div className="kv-grid">
-                  <KeyValue label="Chiffrement" value={settings.security.encryption} />
-                  <KeyValue label="Dérivation de mot de passe" value={settings.security.argon2Params} />
-                  <KeyValue label="Durée de session" value={`${settings.security.sessionTtlMinutes} minutes`} />
-                </div>
-                <p className="muted small">Les secrets des connecteurs ne sortent jamais du serveur ; le frontend ne les affiche pas.</p>
+              <Card title="Sécurité" subtitle="Ce qui protège vos données sur le serveur.">
+                <ul className="list" data-testid="security-list">
+                  <SecurityRow label="Mots de passe" detail="Hachés (Argon2id) : illisibles, même avec la base." />
+                  <SecurityRow label="E-mails" detail="Chiffrés (AES-256-GCM)." />
+                  <SecurityRow label="Identifiants des banques et courtiers" detail="Chiffrés (AES-256-GCM), jamais réaffichés." />
+                  <SecurityRow label="Sessions" detail={`Jetons hachés, expiration après ${settings.security.sessionTtlMinutes} min d’inactivité.`} />
+                  <SecurityRow
+                    label="Sauvegardes"
+                    detail={settings.security.backupsEncrypted === true ? 'Chiffrées sur le disque.' : 'Non chiffrées : activez SUIVIINVEST_BACKUP_ENCRYPTION.'}
+                    ok={settings.security.backupsEncrypted === true}
+                  />
+                  <SecurityRow
+                    label="Lien « mot de passe oublié » par e-mail"
+                    detail={settings.security.emailConfigured === true ? 'Envoi d’e-mails configuré.' : 'Non configuré : le code de secours reste disponible.'}
+                    ok={settings.security.emailConfigured === true}
+                  />
+                </ul>
+                <p className="muted small" style={{ marginTop: 8 }}>
+                  Algorithme : {settings.security.argon2Params}. Gérez votre mot de passe et vos appareils dans{' '}
+                  <Link to="/profil" className="btn-link">
+                    Profil
+                  </Link>
+                  .
+                </p>
               </Card>
             </Grid>
 
-            <AccountsPanel />
-
-            <Card title="Santé du serveur" subtitle="Point de contrôle /health.">
+            <Card title="Serveur">
               {health.data === null ? (
                 <SkeletonLines lines={3} />
               ) : (
                 <div className="kv-grid">
-                  <KeyValue label="État" value={health.data.status === 'ok' ? 'Opérationnel' : 'Dégradé'} tone={health.data.status === 'ok' ? 'up' : 'down'} />
+                  <KeyValue
+                    label="État"
+                    value={health.data.status === 'ok' ? 'Opérationnel' : 'Dégradé'}
+                    tone={health.data.status === 'ok' ? 'up' : 'down'}
+                  />
                   <KeyValue label="Version" value={health.data.version} />
-                  <KeyValue label="Disponibilité" value={formatUptime(health.data.uptimeSeconds)} />
-                  <KeyValue label="Base" value={health.data.database.ok ? `OK (${health.data.database.migrations} migrations)` : 'Indisponible'} />
-                  <KeyValue label="Connecteurs" value={`${health.data.connectors}`} />
+                  <KeyValue label="En ligne depuis" value={formatUptime(health.data.uptimeSeconds)} />
+                  <KeyValue label="Devise de référence" value={settings.baseCurrency} />
+                  <KeyValue
+                    label="Synchro automatique"
+                    value={settings.scheduler.enabled ? 'Activée' : 'Désactivée'}
+                  />
                   <KeyValue label="Dernière synchro" value={formatDate(health.data.lastSyncAt)} />
+                  <KeyValue
+                    label="Base de données"
+                    value={health.data.database.ok ? `OK · ${health.data.database.migrations} migrations` : 'Indisponible'}
+                  />
+                  <KeyValue label="Sources disponibles" value={`${health.data.connectors}`} />
                 </div>
               )}
             </Card>
-
-            <ReadOnlyNote text="Mode lecture seule : aucune fonction d’achat, de vente, de virement ou de signature n’existe dans cette interface." />
           </>
         )}
       </AsyncView>
     </>
+  );
+}
+
+function SecurityRow({ label, detail, ok = true }: { readonly label: string; readonly detail: string; readonly ok?: boolean }) {
+  return (
+    <li className="list-row">
+      <span className={ok ? 'logo tone-up' : 'logo tone-down'} aria-hidden="true">
+        {ok ? <IconCheck size={18} /> : <IconShield size={18} />}
+      </span>
+      <span className="list-row-main">
+        <strong>{label}</strong>
+        <span>{detail}</span>
+      </span>
+    </li>
   );
 }

@@ -1,6 +1,7 @@
 # SuiviInvest
 
-Tableau de bord de patrimoine personnel, **auto-hébergé** et **strictement en lecture seule** :
+Application de suivi de patrimoine, **auto-hébergée** et **strictement en lecture seule**, au
+design épuré d'une appli de courtage (clair / sombre, pensée pour le téléphone) :
 actions, ETF, crypto, comptes bancaires, immobilier, crédits, revenus, dépenses, dividendes
 et liquidités, réunis dans une seule vue.
 
@@ -28,17 +29,18 @@ et liquidités, réunis dans une seule vue.
 
 | Domaine | Contenu |
 | --- | --- |
-| **Dashboard** | Patrimoine net, variations (jour, 1 mois, YTD, 1 an, depuis le début), graphique 1D→MAX, répartition par classe et par établissement |
+| **Accueil** | Patrimoine net, variations (jour, 1 mois, YTD, 1 an, depuis le début), graphique 1D→MAX, répartition par classe et par établissement |
 | **Investissements** | Positions, PRU (coût moyen pondéré), plus-values latentes/réalisées, dividendes, frais, TWR, XIRR, allocation |
 | **Crypto** | Wallets par adresse publique, multi-chaînes (Ethereum, Arbitrum, Optimism, Base, Polygon, BNB Chain, Avalanche), tokens ERC-20, gas, staking |
 | **Immobilier** | Fiche complète (bien, crédit, revenus, charges), échéancier, rendements brut/net/sur apport, cash-flow, equity |
-| **Cash & Banking** | Comptes bancaires, soldes, devise d'origine |
-| **Transactions** | Timeline globale filtrable (date, provider, compte, type, devise, montant, recherche), pagination par curseur |
+| **Banque** | Comptes bancaires, soldes, devise d'origine |
+| **Activité** | Timeline globale filtrable (date, provider, compte, type, devise, montant, recherche), pagination par curseur |
 | **Revenus** | Dividendes, intérêts, loyers, staking : par type, par mois, par compte, annualisation |
-| **Analytics** | Performance par période et par compte, allocation, risque (drawdown, volatilité, part crypto/immobilier, levier) |
-| **Connexions** | État par fournisseur (Connected / Syncing / Synced / Auth requise / Erreur), dernière synchro, historique détaillé, « Synchroniser tout » |
+| **Analyses** | Performance par période et par compte, allocation, risque (drawdown, volatilité, part crypto/immobilier, levier) |
+| **Connexions** | Saisie chiffrée des identifiants, état par source (connecté, en cours, validation requise, erreur), dernière synchro, historique, « Synchroniser tout » |
 | **Imports** | Assistant complet : détection du format, aperçu, mapping des colonnes, détection des doublons, import idempotent |
-| **Paramètres** | Devise de base, thème, fournisseurs de prix, sauvegardes, informations de sécurité |
+| **Profil** | Nom, identifiant, e-mail chiffré, mot de passe, code de secours, appareils connectés, membres |
+| **Paramètres** | Thème, cours de bourse, sauvegardes chiffrées, état de la sécurité et du serveur |
 
 ### Sources de données
 
@@ -114,14 +116,22 @@ Un virement entre deux de vos comptes (Revolut → DEGIRO, par exemple) n'est **
 performance** : le patrimoine total est inchangé, et seule la répartition par établissement bouge.
 C'est vérifié par test de bout en bout.
 
-### Clés d'API et sidecars
+### Identifiants, clés d'API et sidecars
+
+Les identifiants DEGIRO (identifiant, mot de passe, clé TOTP facultative) et Trade Republic
+(téléphone, PIN) se saisissent dans **Connexions → Connecter** (ou « Modifier les
+identifiants » plus tard). Ils sont **chiffrés** (AES-256-GCM) sur votre serveur et ne sont
+jamais réaffichés ni renvoyés par l'API.
+
+Ces deux sources passent par un **sidecar** Python (bibliothèques non officielles
+`degiro-connector` et `pytr`), un processus séparé qui n'expose que des lectures. **L'image
+Docker les embarque et les branche automatiquement** : rien à régler. Trade Republic demande
+une validation dans son application mobile à la première synchronisation ; la session
+validée est conservée dans le volume de données (`/data/home`) et survit aux mises à jour.
+Détails : `docs/connectors/sidecars.md`.
 
 Aucune clé n'est obligatoire pour les wallets EVM : les nœuds publics et les explorateurs
 Blockscout répondent sans clé. Une clé (Etherscan, Alchemy) améliore la fiabilité de l'historique.
-
-Les sources qui dépendent de bibliothèques non officielles (DEGIRO, Trade Republic) passent par un
-**sidecar** : un processus séparé, isolé, qui n'expose que des opérations de lecture. Le détail est
-dans `docs/connectors/sidecars.md`, l'activation dans `.env`.
 
 ---
 
@@ -172,36 +182,44 @@ git clone <URL_DE_VOTRE_DEPOT> /opt/suiviinvest
 cd /opt/suiviinvest
 ```
 
-### 3. Configuration
+### 3. Installer et démarrer (une commande)
+
+Depuis votre session SSH (Termius par exemple), dans `/opt/suiviinvest` :
 
 ```bash
-cp .env.example .env
-# Clé maîtresse : à sauvegarder ailleurs (gestionnaire de mots de passe).
-# Sans elle, les identifiants des connecteurs sont irrécupérables.
-echo "SUIVIINVEST_MASTER_KEY=$(openssl rand -base64 48)" >> .env
-chmod 600 .env
+./scripts/install-server.sh https://patrimoine.mondomaine.fr
 ```
 
-Vérifiez dans `.env` : `SUIVIINVEST_COOKIE_SECURE=true` et `SUIVIINVEST_TRUST_PROXY=true`
-si vous mettez l'application derrière HTTPS.
+Le script crée `.env` avec une **clé maîtresse aléatoire** (affichée une seule fois :
+copiez-la dans votre gestionnaire de mots de passe), restreint ses droits (`chmod 600`),
+construit l'image puis démarre le conteneur et vérifie qu'il répond. Relancé plus tard, il
+**conserve** votre `.env` et sa clé : il sert aussi de commande de mise à jour.
 
-### 4. Démarrer
+L'adresse publique est facultative ; elle est nécessaire pour les liens « mot de passe
+oublié » envoyés par e-mail (voir plus bas). Vérifiez dans `.env` :
+`SUIVIINVEST_COOKIE_SECURE=true` et `SUIVIINVEST_TRUST_PROXY=true` derrière HTTPS
+(mettez `false` si vous accédez temporairement en HTTP par l'IP, sinon la connexion échoue).
+
+### 4. Premier accès
+
+Ouvrez l'adresse de l'application : l'écran **« Créez votre compte »** demande un nom, un
+identifiant, un e-mail (facultatif) et un mot de passe (10 caractères minimum). Un **code de
+secours** est ensuite affiché une seule fois : rangez-le, il permet de reprendre la main sans
+e-mail ni accès au serveur.
+
+Vérifications utiles :
 
 ```bash
-docker compose up -d
 docker compose ps          # le service doit être « healthy »
 docker compose logs -f     # logs JSON structurés
 ```
-
-Ouvrez `http://<IP_DU_SERVEUR>:9123` : la première visite demande de **créer le mot de passe**
-de l'application (10 caractères minimum, haché en Argon2id).
 
 ### 5. Mise à jour
 
 ```bash
 cd /opt/suiviinvest
 git pull
-docker compose build && docker compose up -d
+./scripts/install-server.sh
 # Les migrations de base s'appliquent automatiquement au démarrage.
 ```
 
@@ -267,6 +285,10 @@ Certificat : `sudo certbot --nginx -d patrimoine.example.com`.
 | CORS | Liste blanche explicite ; aucune origine tierce par défaut |
 | Limitation de débit | 8 tentatives de connexion / 15 min avec blocage progressif |
 | Secrets des connecteurs | AES-256-GCM, clé dérivée (HKDF-SHA256) de `SUIVIINVEST_MASTER_KEY` |
+| Adresses e-mail | AES-256-GCM + index aveugle HMAC-SHA256 (recherche sans stocker l'adresse en clair) |
+| Liens « mot de passe oublié » | Jeton 256 bits stocké en SHA-256, usage unique, 30 min, aucune énumération de comptes |
+| Sauvegardes | Chiffrées sur le disque (AES-256-GCM, fichiers `.enc`) par défaut |
+| Appareils connectés | Liste des sessions, fermeture à distance, « déconnecter les autres appareils » |
 | Clé maîtresse | Uniquement en variable d'environnement / secret Docker, **jamais en base** |
 | Journalisation | Aucun mot de passe, PIN, cookie, jeton ou clé privée ; valeurs sensibles masquées |
 | Erreurs | Normalisées, nettoyées : aucun détail interne ni secret dans une réponse |
@@ -282,6 +304,8 @@ le test — aucun n'y apparaît. Ce qui est stocké :
 | --- | --- | --- |
 | Mot de passe | Empreinte **Argon2id** (`$argon2id$v=19$m=19456,t=2,p=1$…`) | Non |
 | Code de récupération | **SHA-256** hexadécimal | Non |
+| Adresse e-mail | **AES-256-GCM** (clé hors base) + HMAC | Seulement avec la clé maîtresse |
+| Lien de réinitialisation | **SHA-256** du jeton | Non |
 | Jeton de session | **SHA-256** du jeton | Non |
 
 Conséquence assumée : **un mot de passe ne peut jamais être relu ni retrouvé**, seulement remplacé
@@ -290,6 +314,14 @@ Conséquence assumée : **un mot de passe ne peut jamais être relu ni retrouvé
 **Interdits structurels.** Aucun champ de base ne peut contenir une seed phrase ou une clé
 privée ; l'API refuse explicitement une connexion qui en fournirait une. Aucune méthode
 d'achat/vente/ordre/virement n'existe dans le code des connecteurs.
+
+### Ce qui n'est pas chiffré, et comment le couvrir
+
+La base SQLite elle-même (montants, positions, historique) n'est **pas** chiffrée fichier par
+fichier : `node:sqlite` ne propose pas SQLCipher. Tout ce qui permettrait d'**accéder** à vos
+comptes (mots de passe, identifiants bancaires, e-mails, sessions) l'est, ainsi que les
+sauvegardes. Pour chiffrer aussi le reste au repos, activez le chiffrement du disque du
+serveur (LUKS à l'installation d'Ubuntu, ou le « chiffrement du volume » de votre hébergeur).
 
 ### Bonnes pratiques côté serveur
 
@@ -317,6 +349,17 @@ lui, reste dans `users`, qui est… exclu : relisez la ligne suivante).
 > demande de recréer le mot de passe de l'application. La sauvegarde **SQLite** (`.db`)
 > conserve tout, y compris le compte et les sessions.
 
+### Chiffrement des sauvegardes
+
+Par défaut (`SUIVIINVEST_BACKUP_ENCRYPTION=true`), chaque fichier est chiffré avant d'être
+écrit (`suiviinvest-….db.enc`, `.json.enc`, `csv-…/*.csv.enc`) : une sauvegarde copiée hors
+du serveur est illisible sans la clé maîtresse. Pour en lire une :
+
+```bash
+docker compose exec suiviinvest node apps/api/src/cli/decrypt-backup.ts \
+  /backups/suiviinvest-AAAA….db.enc /backups/restauration.db
+```
+
 ### Sauvegarde automatique
 
 Activée par défaut : tous les jours à 3 h 30 (`SUIVIINVEST_BACKUP_CRON`), dans le volume
@@ -338,7 +381,8 @@ docker compose down
 docker run --rm -v suiviinvest-backups:/backups -v "$PWD":/work node:24-bookworm-slim \
   node -e "const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync('/backups/suiviinvest-AAAAMMJJ.db');console.log(d.prepare('PRAGMA integrity_check').get())"
 
-# 3. Copier la sauvegarde par-dessus la base courante
+# 3. (Sauvegarde chiffrée) la déchiffrer d'abord avec decrypt-backup.ts (voir plus haut),
+#    puis copier le fichier .db obtenu par-dessus la base courante
 docker run --rm -v suiviinvest-data:/data -v suiviinvest-backups:/backups alpine \
   sh -c "cp /backups/suiviinvest-AAAAMMJJ.db /data/suiviinvest.db && rm -f /data/suiviinvest.db-wal /data/suiviinvest.db-shm"
 
@@ -387,7 +431,7 @@ docker run --rm -v suiviinvest-backups:/backups node:24-bookworm-slim \
 
 ```bash
 npm install
-npm test          # 255 tests (domaine + connecteurs + API), aucun réseau, aucun identifiant
+npm test          # 263 tests (domaine + connecteurs + API), aucun réseau, aucun identifiant
 npm run typecheck # TypeScript strict, aucun `any`
 npm run dev:api   # API sur :9123 (rechargement automatique)
 npm run dev:web   # frontend Vite sur :5173
@@ -408,12 +452,12 @@ docs/                  Architecture, notes de conception, veille sur les connect
 ### Tests
 
 ```bash
-npm test                                  # tout le domaine + connecteurs + API (255 tests)
+npm test                                  # tout le domaine + connecteurs + API (263 tests)
 npm run test:core                         # domaine pur
 npm run test:api                          # API + intégration (comptes, récupération, CLI)
 node --test apps/api/test/api.test.ts     # un fichier précis
-node --test apps/web/test/*.test.ts       # aides d'affichage du front (64 tests)
-npm run test:e2e                          # parcours complets Playwright (19 tests)
+node --test apps/web/test/*.test.ts       # aides d'affichage du front (67 tests)
+npm run test:e2e                          # parcours complets Playwright (22 tests)
 ```
 
 Les connecteurs sont **entièrement mockables** : aucun test n'essaie de vos identifiants
@@ -424,6 +468,7 @@ ni d'un accès réseau.
 ```bash
 npx playwright install chromium           # une seule fois
 npm run test:e2e
+# Chromium déjà installé ailleurs : PLAYWRIGHT_CHROMIUM_EXECUTABLE=/chemin/chrome npm run test:e2e
 ```
 
 Le harnais démarre **seul** l'API et sert le front construit, sur un port libre et avec une base
@@ -450,49 +495,45 @@ l'application ni la suite de tests.
 
 ### Se déconnecter
 
-Le bouton **« Se déconnecter »** de la barre supérieure ferme la session côté serveur (le jeton est
-supprimé, pas seulement le cookie) : le lien rejoué depuis un autre onglet ne fonctionne plus.
+Bouton **« Se déconnecter »** en bas du menu (sur téléphone : onglet **Plus**), dans la barre
+du haut, et dans **Profil**. La session est fermée côté serveur (le jeton est supprimé, pas
+seulement le cookie). **Profil → Appareils connectés** liste vos sessions et permet d'en
+fermer une à distance ou de **déconnecter tous les autres appareils**.
 
-### Créer un compte
+### Le compte
 
-- **Premier compte** : à la première visite, l'application propose de créer le compte. Il devient
-  **propriétaire** de l'application.
-- **Comptes suivants** : Paramètres → **Comptes** → « Ajouter un compte ». Seul un propriétaire
-  connecté peut le faire — il n'existe aucune inscription publique : l'application est exposée sur
-  Internet, une page d'inscription ouverte donnerait accès à votre patrimoine à n'importe qui.
+- **Premier compte** : à la première visite, « Créez votre compte » (nom, identifiant, e-mail
+  facultatif, mot de passe). Il devient **propriétaire** de l'application.
+- **Profil** : nom, identifiant, e-mail (stocké chiffré), mot de passe, code de secours,
+  appareils connectés.
+- **Connexion** par identifiant **ou** par e-mail.
+- **Membres** (Profil, propriétaire uniquement) : il n'existe aucune inscription publique —
+  l'application est exposée sur Internet.
 
-> ⚠️ **Les données ne sont pas cloisonnées par utilisateur.** Un compte supplémentaire voit le
-> même patrimoine, les mêmes comptes et les mêmes connexions que vous. Créez-en un pour une
-> personne de confiance, pas pour « quelqu'un qui peut regarder ».
+> ⚠️ **Les données ne sont pas cloisonnées par utilisateur.** Un membre voit le même
+> patrimoine, les mêmes comptes et les mêmes connexions que vous.
 
-Dès qu'un compte porte un identifiant, l'identifiant devient obligatoire à la connexion (sinon
-l'application ne saurait pas distinguer les comptes). Une installation d'origine — un seul compte
-sans identifiant — garde l'écran « mot de passe seul ».
+Une installation d'origine (un seul compte sans identifiant) continue de fonctionner au mot de
+passe seul ; donnez-vous un identifiant dans **Profil** pour passer au fonctionnement normal.
 
 ### Mot de passe oublié
 
-Trois chemins, du plus simple au dernier recours :
-
-1. **Code de récupération** (écran de connexion → « Mot de passe oublié ? »). Un code de la forme
-   `ABCD-EFGH-JKLM-NPQR-STUV` est remis **une seule fois** à la création du compte, puis à chaque
-   changement de mot de passe. Rangez-le dans votre gestionnaire de mots de passe : le serveur n'en
-   conserve qu'une empreinte, il est donc impossible de vous le réafficher. Il fonctionne sans
-   e-mail, sans téléphone et sans accès au serveur — et il tourne à chaque utilisation.
-2. **Depuis l'application** (Paramètres → **Mon mot de passe** → **Nouveau code**), si vous êtes
-   encore connecté.
-3. **Depuis le serveur**, si le mot de passe ET le code sont perdus :
+1. **Lien par e-mail** — si l'envoi d'e-mails est configuré (`SUIVIINVEST_SMTP_URL`,
+   `SUIVIINVEST_MAIL_FROM`, `SUIVIINVEST_PUBLIC_URL` dans `.env`) et qu'une adresse figure sur
+   le compte. Le lien est valable 30 minutes, une seule fois, et le message affiché est le
+   même que le compte existe ou non.
+2. **Code de secours** (écran de connexion → « Mot de passe oublié ? » → « J'ai un code de
+   secours »). Remis une seule fois à la création du compte et à chaque changement de mot de
+   passe ; réémettable depuis **Profil**. Fonctionne sans e-mail ni accès au serveur.
+3. **Depuis le serveur**, si tout est perdu :
 
 ```bash
 docker compose exec suiviinvest node apps/api/src/cli/reset-password.ts --list
 docker compose exec suiviinvest node apps/api/src/cli/reset-password.ts --username proprietaire --generate
 ```
 
-Le mot de passe généré et le nouveau code de récupération sont affichés **dans votre terminal** :
-notez-les immédiatement. Sans `--generate`, le CLI demande le mot de passe en saisie masquée (il
-n'apparaît ni à l'écran ni dans l'historique du shell).
-
-Tout changement de mot de passe — par l'un des trois chemins — **révoque toutes les sessions** du
-compte : un jeton volé ne survit pas à la reprise en main.
+Tout changement de mot de passe — par l'un des trois chemins — **révoque toutes les sessions**
+du compte et invalide les liens de réinitialisation en cours.
 
 ---
 

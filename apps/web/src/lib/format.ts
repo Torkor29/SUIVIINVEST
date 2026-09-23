@@ -168,6 +168,25 @@ export function toIsoDay(date: Date): string {
   return `${date.getUTCFullYear()}-${month}-${day}`;
 }
 
+/**
+ * Date relative lisible : « à l’instant », « il y a 5 min », « il y a 3 h »,
+ * « hier », puis la date courte au-delà d'une semaine.
+ */
+export function formatRelative(iso: string | null | undefined, now: Date = new Date()): string {
+  const date = parseIsoDate(iso);
+  if (date === null) return '—';
+  const seconds = Math.round((now.getTime() - date.getTime()) / 1000);
+  if (seconds < 60) return 'à l’instant';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'hier';
+  if (days < 7) return `il y a ${days} jours`;
+  return `le ${formatDate(iso)}`;
+}
+
 /** Durée lisible : 950 -> « 950 ms », 65 000 -> « 1 min 5 s ». */
 export function formatDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return '—';

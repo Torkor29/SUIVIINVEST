@@ -1,51 +1,67 @@
-/* Jetons de design : couleurs, espaces, rayons et ombres (thème clair par défaut). */
+/*
+ * Jetons de design.
+ *
+ * Direction : sobre et monochrome, à la manière des applis de courtage modernes.
+ * Le noir et le blanc portent l'interface ; la couleur est réservée au sens
+ * (hausse, baisse, alerte). Les chiffres sont grands, le reste s'efface.
+ */
 :root {
-  --bg: #f4f6fb;
-  --bg-accent: radial-gradient(1200px 600px at 12% -10%, rgba(79, 124, 255, 0.14), transparent 60%),
-    radial-gradient(900px 500px at 92% 0%, rgba(34, 184, 160, 0.12), transparent 55%);
+  --bg: #ffffff;
+  --bg-accent: none;
   --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --surface-3: #eef2f9;
-  --border: rgba(15, 23, 42, 0.09);
-  --border-strong: rgba(15, 23, 42, 0.16);
-  --text: #0d1526;
-  --text-soft: #334155;
-  --muted: #6b7a90;
-  --accent: #3f5df5;
-  --accent-soft: rgba(63, 93, 245, 0.12);
-  --pos: #0f9d76;
-  --neg: #e0424d;
-  --warn: #d98a0b;
-  --info: #2f7de1;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.35);
-  --radius: 16px;
-  --radius-sm: 10px;
+  --surface-2: #f4f4f5;
+  --surface-3: #ebebed;
+  --elevated: #ffffff;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --text: #0a0a0a;
+  --text-soft: #3a3a3c;
+  --muted: #8a8a8e;
+  --accent: #0a0a0a;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(10, 10, 10, 0.06);
+  --pos: #00a86b;
+  --neg: #e5373f;
+  --warn: #c77700;
+  --info: #2b6fe0;
+  --focus: #2b6fe0;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.18);
+  --radius: 20px;
+  --radius-sm: 14px;
   --radius-pill: 999px;
   --space: 16px;
-  --gap: 18px;
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --gap: 24px;
+  --nav-width: 248px;
+  --tabbar-height: 64px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  color-scheme: light;
 }
 
 :root[data-theme='dark'] {
-  --bg: #070c17;
-  --bg-accent: radial-gradient(1200px 600px at 10% -10%, rgba(79, 124, 255, 0.18), transparent 60%),
-    radial-gradient(900px 500px at 90% 0%, rgba(34, 184, 160, 0.14), transparent 55%);
-  --surface: #101a2e;
-  --surface-2: #0c1526;
-  --surface-3: #16223a;
-  --border: rgba(148, 176, 224, 0.14);
-  --border-strong: rgba(148, 176, 224, 0.26);
-  --text: #e9eefb;
-  --text-soft: #c3cde3;
-  --muted: #8d9db8;
-  --accent: #6b8cff;
-  --accent-soft: rgba(107, 140, 255, 0.18);
-  --pos: #35c69b;
-  --neg: #ff6b74;
-  --warn: #f0b344;
-  --info: #63a8ff;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow: 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+  --bg: #000000;
+  --surface: #000000;
+  --surface-2: #121214;
+  --surface-3: #1e1e21;
+  --elevated: #161618;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text: #ffffff;
+  --text-soft: #d1d1d6;
+  --muted: #8e8e93;
+  --accent: #ffffff;
+  --accent-contrast: #000000;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --pos: #2fd07f;
+  --neg: #ff5a5f;
+  --warn: #ffb340;
+  --info: #5b9dff;
+  --focus: #5b9dff;
+  --shadow-sm: none;
+  --shadow: 0 16px 48px -16px rgba(0, 0, 0, 0.9);
+  color-scheme: dark;
 }

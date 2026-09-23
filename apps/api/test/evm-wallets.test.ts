@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { WalletResyncResponse, WalletStatusDto } from '@suiviinvest/api-contract';
-import { registerWalletRoutes } from '../src/routes/wallets.ts';
 import { WalletStatusService, humanizeWalletError } from '../src/services/evm/wallet-status.ts';
 import { InstrumentRepository } from '../src/repositories/accounts.ts';
 import { authRequest, createTestApp, createTestConnector, login, seedAccount, seedActivity, seedQuote } from './helpers.ts';
@@ -119,7 +118,7 @@ test('wallet-status : multi-chaînes, jetons, valeur EUR et dernière synchro pa
 test('routes : GET /api/wallets exige une session', async (t) => {
   const ctx = await createTestApp();
   t.after(() => ctx.cleanup());
-  await registerWalletRoutes(ctx.app.app, { db: ctx.db, sync: ctx.app.sync });
+  // Les routes wallets sont enregistrées par buildApp().
 
   const response = await ctx.app.app.inject({ method: 'GET', url: '/api/wallets' });
   assert.equal(response.statusCode, 401);
@@ -167,7 +166,7 @@ test('routes : resynchronisation d\'un wallet puis dédoublonnage au second pass
   });
   ctx.db.run('UPDATE accounts SET connection_id = ? WHERE id = ?', 'c-mm', accountId);
 
-  await registerWalletRoutes(ctx.app.app, { db: ctx.db, sync: ctx.app.sync });
+  // Les routes wallets sont enregistrées par buildApp().
   const session = await login(ctx);
 
   const first = await authRequest(ctx, session, { method: 'POST', url: `/api/wallets/${accountId}/resync` });
@@ -202,7 +201,7 @@ test('routes : resynchronisation d\'un wallet puis dédoublonnage au second pass
 test('routes : resynchroniser un compte inexistant ou non-crypto est refusé proprement', async (t) => {
   const ctx = await createTestApp();
   t.after(() => ctx.cleanup());
-  await registerWalletRoutes(ctx.app.app, { db: ctx.db, sync: ctx.app.sync });
+  // Les routes wallets sont enregistrées par buildApp().
   const session = await login(ctx);
 
   const missing = await authRequest(ctx, session, { method: 'POST', url: '/api/wallets/inconnu/resync' });

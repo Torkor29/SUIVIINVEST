@@ -6,8 +6,7 @@ import type {
   HealthResponse,
   SessionResponse,
   SettingsDto,
-  TransactionsQuery,
-} from '@suiviinvest/api-contract';
+  TransactionsQuery, ProfileResponse, DeviceSessionListResponse } from '@suiviinvest/api-contract';
 import {
   accountsResponse,
   cryptoResponse,
@@ -95,6 +94,23 @@ function mockSession(authenticated: boolean): SessionResponse {
     role: 'OWNER',
     accountsCount: 1,
     usernameRequired: true,
+    displayName: 'Compte démo',
+    emailResetAvailable: false,
+  };
+}
+
+/** Profil simulé du compte démo. */
+function mockProfile(): ProfileResponse {
+  return {
+    id: 'owner',
+    username: 'proprietaire',
+    displayName: 'Compte démo',
+    email: 'demo@exemple.fr',
+    role: 'OWNER',
+    createdAt: '2026-01-02T09:00:00.000Z',
+    lastLoginAt: new Date().toISOString(),
+    passwordChangedAt: '2026-01-02T09:00:00.000Z',
+    hasRecoveryCode: true,
   };
 }
 
@@ -112,6 +128,23 @@ export function mockRequest(url: string, method: string, body: unknown): unknown
     return mockSession(true) satisfies SessionResponse;
   }
   if (path === '/api/auth/logout') return mockSession(false) satisfies SessionResponse;
+  if (path === '/api/auth/me') return mockProfile();
+  if (path === '/api/auth/sessions') {
+    return {
+      sessions: [
+        {
+          id: 'demo',
+          current: true,
+          createdAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          device: 'Ce navigateur',
+          ip: null,
+        },
+      ],
+    } satisfies DeviceSessionListResponse;
+  }
+  if (path === '/api/auth/accounts') return { accounts: [] };
 
   if (path === '/api/networth') return netWorthResponse(periodFrom(params));
   if (path === '/api/accounts') return accountsResponse();

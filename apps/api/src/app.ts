@@ -18,6 +18,7 @@ import { registerAdminRoutes } from './routes/admin.ts';
 import { registerAuthRoutes, sendError } from './routes/auth.ts';
 import { registerManualRoutes } from './routes/manual.ts';
 import { registerWealthRoutes } from './routes/wealth.ts';
+import { registerWalletRoutes } from './routes/wallets.ts';
 import { AuthService, SESSION_COOKIE } from './security/sessions.ts';
 import { API_RATE_LIMIT, RateLimiter } from './security/rate-limit.ts';
 import { SecretsStore } from './security/secrets.ts';
@@ -28,6 +29,7 @@ import { MarketDataService, type PriceProvider } from './services/marketdata.ts'
 import { PortfolioService } from './services/portfolio.ts';
 import { RealEstateService } from './services/realestate.ts';
 import { SyncService } from './services/sync.ts';
+import { createSidecarTransports } from './services/sidecar-registry.ts';
 import { createMailer, type Mailer } from './services/mailer.ts';
 import { createE2eConnectors } from './testing/e2e-connectors.ts';
 
@@ -123,10 +125,15 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     ...(deps.providers ? { providers: deps.providers } : {}),
     ...(deps.now ? { now: deps.now } : {}),
   });
+  // Sidecars Python (DEGIRO, Trade Republic) : branchés seulement sur le registre
+  // réel. Non configurés, ils restent inertes et le connecteur le dit en clair.
+  const sidecars =
+    deps.registry === undefined && !useE2eConnectors ? createSidecarTransports({ logger }) : undefined;
   const sync = new SyncService(db, registry, secrets, {
     baseCurrency: config.baseCurrency,
     logger,
     integrationKeys: config.integrationKeys,
+    ...(sidecars ? { sidecars: { ...sidecars } } : {}),
   });
   const imports = new ImportService(db, { baseCurrency: config.baseCurrency, registry });
   const backup = new BackupService(db, {
@@ -236,6 +243,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // Saisie manuelle : indispensable pour les sources qui ne fournissent pas les
   // positions (Crédit Agricole) — l'utilisateur complète ce que l'API ne donne pas.
   await registerManualRoutes(app, { db });
+  // Portefeuilles EVM : état par chaîne et resynchronisation d'un wallet.
+  await registerWalletRoutes(app, { db, sync });
   await registerAdminRoutes(app, {
     db,
     registry,

@@ -88,7 +88,7 @@ test('la synchronisation d’une source affiche un retour lisible et son détail
   await expect(degiroCard.getByTestId('connection-accounts')).toContainText('Comptes');
 });
 
-test('la vue wallets gère proprement un endpoint absent', async ({ page }) => {
+test('la vue wallets s’affiche (ou explique proprement son absence)', async ({ page }) => {
   await page.goto('/');
   await gotoSection(page, 'Connexions');
 

@@ -85,7 +85,7 @@ export function InvestmentsPage() {
     <>
       <PageHeader
         title="Investissements"
-        subtitle="Actions, ETF et fonds — valorisation en euros, devise d’origine conservée."
+        subtitle="Actions, ETF et fonds, valorisés en euros."
         actions={
           <label className="field">
             <span className="field-label">Compte</span>
@@ -107,7 +107,7 @@ export function InvestmentsPage() {
         data={state.data}
         onRetry={state.reload}
         empty={(data) => data.positions.length === 0}
-        emptyState={<EmptyState title="Aucune position" hint="Aucun instrument n’est associé à ce compte." />}
+        emptyState={<EmptyState title="Aucune position" hint="Synchronisez un courtier ou importez un relevé pour voir vos positions." />}
         skeleton={
           <>
             <SkeletonTiles count={4} />
@@ -126,7 +126,7 @@ export function InvestmentsPage() {
                 hint={`Prix de revient ${formatEur(data.totals.costBasis, 0)}`}
               />
               <StatTile label="Dividendes encaissés" value={formatEur(data.totals.dividends, 0)} hint="Depuis l’origine" />
-              <StatTile label="Plus-values réalisées" value={formatSignedEur(data.totals.realizedPnl, 0)} hint={`Frais ${formatEur(data.totals.fees, 0)}`} />
+              <StatTile label="Plus-values encaissées" value={formatSignedEur(data.totals.realizedPnl, 0)} hint={`Frais ${formatEur(data.totals.fees, 0)}`} />
             </Grid>
 
             <Grid className="grid-2">
@@ -151,7 +151,7 @@ export function InvestmentsPage() {
                 </div>
                 {data.performance.note !== null && <p className="muted small">{data.performance.note}</p>}
               </Card>
-              <Card title="Allocation par ligne" subtitle="Les huit premières positions.">
+              <Card title="Allocation par ligne" subtitle="Vos huit plus grosses positions.">
                 <div className="split">
                   <DonutChart slices={data.allocation} centerLabel="Portefeuille" centerValue={formatEur(data.totals.marketValue, 0)} />
                   <AllocationLegend slices={data.allocation} />
@@ -159,7 +159,7 @@ export function InvestmentsPage() {
               </Card>
             </Grid>
 
-            <Card title="Positions" subtitle="Tri par colonne, devise d’origine affichée sous la contre-valeur." padded={false}>
+            <Card title="Positions" subtitle="Cliquez sur une colonne pour trier." padded={false}>
               <DataTable rows={data.positions} columns={columns} rowKey={(row) => row.instrumentId + row.accountId} initialSortKey="value" />
             </Card>
 

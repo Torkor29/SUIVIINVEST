@@ -1,99 +1,205 @@
 import { useState, type FormEvent } from 'react';
-import type { AccountCreatedResponse, AccountListResponse, AccountSummaryDto, ChangePasswordResponse } from '@suiviinvest/api-contract';
+import type {
+  AccountCreatedResponse,
+  AccountListResponse,
+  AccountSummaryDto,
+  ChangePasswordResponse,
+} from '@suiviinvest/api-contract';
 import { request } from '../../lib/api.ts';
 import { useAuth } from '../../lib/auth.tsx';
 import { useAsync } from '../../lib/useAsync.ts';
 import { useAction } from '../../lib/useAction.ts';
+import { formatRelative } from '../../lib/format.ts';
+import { initialsOf } from '../../lib/initials.ts';
+import { MIN_PASSWORD_LENGTH } from '../../lib/password.ts';
 import { ActionFeedback } from '../ui/ActionFeedback.tsx';
 import { Card } from '../ui/Card.tsx';
 import { Badge } from '../ui/Stat.tsx';
-import { formatDate } from '../../lib/format.ts';
-import { RecoveryCodeNotice } from './RecoveryCodeNotice.tsx';
+import { PasswordField, TextField } from '../ui/Fields.tsx';
 import { SkeletonLines } from '../ui/Skeleton.tsx';
+import { RecoveryCodeNotice } from './RecoveryCodeNotice.tsx';
+
+/** Code de secours fraîchement émis, à afficher une seule fois. */
+interface IssuedCode {
+  readonly code: string;
+  readonly subject: string;
+}
+
+function IssuedCodeCard({ issued, onDone }: { readonly issued: IssuedCode; readonly onDone: () => void }) {
+  return (
+    <Card>
+      <div className="form-stack">
+        <RecoveryCodeNotice code={issued.code} subject={issued.subject} onDone={onDone} />
+      </div>
+    </Card>
+  );
+}
 
 /**
- * Sécurité du compte : changement de mot de passe et gestion des comptes.
+ * Mot de passe et code de secours du compte connecté.
  *
- * Deux principes visibles ici :
- *  - aucun mot de passe n'est jamais relu : on ne peut que le REMPLACER, et
- *    l'ancien est exigé pour un changement volontaire ;
- *  - le code de récupération n'apparaît qu'à sa création ou à sa rotation.
- *
- * Rappel affiché à l'utilisateur : un compte supplémentaire ouvre le MÊME
- * patrimoine — les données ne sont pas cloisonnées par utilisateur.
+ * Aucun mot de passe n'est jamais relu : il ne peut qu'être remplacé, et
+ * l'actuel est exigé. Un changement déconnecte tous les appareils.
  */
-export function AccountsPanel() {
+export function PasswordPanel() {
   const { session, refresh } = useAuth();
-  const accounts = useAsync<AccountListResponse>(async (signal) => {
-    // La liste n'est servie qu'au propriétaire : un membre n'appelle rien.
-    if (session?.role !== 'OWNER') return { accounts: [] };
-    return request<AccountListResponse>('/api/auth/accounts', { signal });
-  }, [session?.role]);
-  const create = useAction();
   const password = useAction();
-
-  const [issuedCode, setIssuedCode] = useState<string | null>(null);
-  const [issuedFor, setIssuedFor] = useState<string>('votre compte');
-
-  // création
-  const [newUsername, setNewUsername] = useState('');
-  const [newDisplayName, setNewDisplayName] = useState('');
-  const [newAccountPassword, setNewAccountPassword] = useState('');
-  const [ownerUsername, setOwnerUsername] = useState('');
-
-  // changement de mot de passe
+  const rotate = useAction();
+  const [issued, setIssued] = useState<IssuedCode | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const mismatch = nextPassword !== '' && confirmPassword !== '' && nextPassword !== confirmPassword;
+  const subject = session?.username === null || session?.username === undefined ? 'votre compte' : `@${session.username}`;
 
-  const isOwner = session?.role === 'OWNER';
-  const ownerNeedsUsername = isOwner && session?.username === null;
-
-  const submitPassword = (event: FormEvent<HTMLFormElement>): void => {
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    if (nextPassword !== confirmPassword) {
-      password.reset();
-      return;
-    }
+    if (nextPassword !== confirmPassword) return;
     void password.run(async () => {
       const result = await request<ChangePasswordResponse>('/api/auth/password', {
         method: 'POST',
         json: { currentPassword, newPassword: nextPassword },
       });
-      setIssuedCode(result.recoveryCode);
-      setIssuedFor(session?.username ?? 'votre compte');
+      setIssued({ code: result.recoveryCode, subject });
       setCurrentPassword('');
       setNextPassword('');
       setConfirmPassword('');
-      // Le serveur a révoqué toutes les sessions : on repart de l'écran de connexion.
-      return 'Mot de passe remplacé. Toutes les sessions ont été déconnectées.';
+      return 'Mot de passe modifié.';
     });
   };
 
-  const submitCreate = (event: FormEvent<HTMLFormElement>): void => {
+  const newCode = (): void => {
+    void rotate.run(async () => {
+      const me = await request<{ id: string }>('/api/auth/me');
+      const result = await request<{ recoveryCode: string }>(`/api/auth/accounts/${me.id}/recovery`, { method: 'POST' });
+      setIssued({ code: result.recoveryCode, subject });
+      return 'Nouveau code émis.';
+    });
+  };
+
+  if (issued !== null) {
+    return <IssuedCodeCard issued={issued} onDone={() => {
+          setIssued(null);
+          refresh();
+        }} />;
+  }
+
+  return (
+    <>
+      <Card title="Mot de passe" subtitle="Changer de mot de passe déconnecte tous vos appareils.">
+        <form className="form-stack" onSubmit={submit}>
+          <PasswordField
+            label="Mot de passe actuel"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            data-testid="current-password"
+            autoComplete="current-password"
+            required
+          />
+          <PasswordField
+            label="Nouveau mot de passe"
+            value={nextPassword}
+            onChange={setNextPassword}
+            data-testid="new-password"
+            autoComplete="new-password"
+            showStrength
+            required
+          />
+          <PasswordField
+            label="Confirmer le nouveau mot de passe"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            data-testid="confirm-password"
+            autoComplete="new-password"
+            required
+          />
+          {mismatch && <p className="feedback feedback-error">Les deux mots de passe ne sont pas identiques.</p>}
+          <div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              data-testid="change-password"
+              disabled={
+                password.pending ||
+                currentPassword === '' ||
+                nextPassword.length < MIN_PASSWORD_LENGTH ||
+                nextPassword !== confirmPassword
+              }
+            >
+              {password.pending ? 'Enregistrement…' : 'Changer le mot de passe'}
+            </button>
+          </div>
+          <ActionFeedback state={password} />
+        </form>
+      </Card>
+
+      <Card
+        title="Code de secours"
+        subtitle="Il permet de choisir un nouveau mot de passe si vous l’oubliez, même sans e-mail."
+      >
+        <p className="muted small">
+          Le code n’est jamais stocké en clair et ne peut pas être réaffiché. Si vous l’avez perdu, émettez-en un
+          nouveau : l’ancien cessera aussitôt de fonctionner.
+        </p>
+        <div className="card-actions-row">
+          <button type="button" className="btn" data-testid="rotate-recovery" disabled={rotate.pending} onClick={newCode}>
+            {rotate.pending ? 'Émission…' : 'Émettre un nouveau code'}
+          </button>
+        </div>
+        <ActionFeedback state={rotate} />
+      </Card>
+    </>
+  );
+}
+
+/**
+ * Comptes de l'application (propriétaire uniquement).
+ *
+ * Rappel affiché : un compte supplémentaire ouvre le MÊME patrimoine — les
+ * données ne sont pas séparées par utilisateur.
+ */
+export function MembersPanel() {
+  const { session, refresh } = useAuth();
+  const accounts = useAsync<AccountListResponse>(async (signal) => {
+    if (session?.role !== 'OWNER') return { accounts: [] };
+    return request<AccountListResponse>('/api/auth/accounts', { signal });
+  }, [session?.role]);
+  const create = useAction();
+  const [issued, setIssued] = useState<IssuedCode | null>(null);
+  const [newUsername, setNewUsername] = useState('');
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newAccountPassword, setNewAccountPassword] = useState('');
+  const [ownerUsername, setOwnerUsername] = useState('');
+  const ownerNeedsUsername = session?.role === 'OWNER' && session.username === null;
+
+  if (session?.role !== 'OWNER') return null;
+
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     void create.run(async () => {
       const result = await request<AccountCreatedResponse>('/api/auth/accounts', {
         method: 'POST',
         json: {
-          username: newUsername,
+          username: newUsername.trim().toLowerCase(),
           password: newAccountPassword,
-          ...(newDisplayName === '' ? {} : { displayName: newDisplayName }),
-          ...(ownerNeedsUsername && ownerUsername !== '' ? { ownerUsername } : {}),
+          ...(newDisplayName.trim() === '' ? {} : { displayName: newDisplayName.trim() }),
+          ...(newEmail.trim() === '' ? {} : { email: newEmail.trim() }),
+          ...(ownerNeedsUsername && ownerUsername !== '' ? { ownerUsername: ownerUsername.trim().toLowerCase() } : {}),
         },
       });
-      setIssuedCode(result.recoveryCode);
-      setIssuedFor(String(result.account.username ?? 'le nouveau compte'));
+      setIssued({ code: result.recoveryCode, subject: `@${result.account.username ?? 'nouveau'}` });
       setNewUsername('');
       setNewDisplayName('');
+      setNewEmail('');
       setNewAccountPassword('');
       setOwnerUsername('');
       accounts.reload();
-      return `Compte ${result.account.username} créé — notez son code de récupération.`;
+      return `Compte @${result.account.username} créé.`;
     });
   };
 
-  const toggleAccount = (account: AccountSummaryDto): void => {
+  const toggle = (account: AccountSummaryDto): void => {
     void request<AccountSummaryDto>(`/api/auth/accounts/${account.id}`, {
       method: 'PATCH',
       json: { disabled: !account.disabled },
@@ -102,237 +208,121 @@ export function AccountsPanel() {
       .catch(() => undefined);
   };
 
-  const rotateCode = (account: AccountSummaryDto): void => {
-    void request<{ recoveryCode: string }>(`/api/auth/accounts/${account.id}/recovery`, {
-      method: 'POST',
-    })
-      .then((result) => {
-        setIssuedCode(result.recoveryCode);
-        setIssuedFor(String(account.username ?? 'ce compte'));
-      })
+  const rotateFor = (account: AccountSummaryDto): void => {
+    void request<{ recoveryCode: string }>(`/api/auth/accounts/${account.id}/recovery`, { method: 'POST' })
+      .then((result) =>
+        setIssued({ code: result.recoveryCode, subject: `@${account.username ?? 'compte'}` }),
+      )
       .catch(() => undefined);
   };
 
-  if (issuedCode !== null) {
-    return (
-      <Card title="Code de récupération" subtitle="À conserver hors de l’application.">
-        <RecoveryCodeNotice
-          code={issuedCode}
-          subject={issuedFor}
-          onDone={() => {
-            setIssuedCode(null);
-            refresh();
-          }}
-        />
-      </Card>
-    );
+  if (issued !== null) {
+    return <IssuedCodeCard issued={issued} onDone={() => {
+          setIssued(null);
+          refresh();
+        }} />;
   }
 
   return (
-    <>
-      <Card
-        title="Mon mot de passe"
-        subtitle="Le mot de passe n’est jamais lisible : il est haché (Argon2id) et ne peut qu’être remplacé."
-      >
-        <form onSubmit={submitPassword}>
-          <label className="field">
-            <span className="field-label">Mot de passe actuel</span>
-            <input
-              className="input"
-              type="password"
-              data-testid="current-password"
-              value={currentPassword}
-              autoComplete="current-password"
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              required
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Nouveau mot de passe (10 caractères minimum)</span>
-            <input
-              className="input"
-              type="password"
-              data-testid="new-password"
-              value={nextPassword}
-              autoComplete="new-password"
-              onChange={(event) => setNextPassword(event.target.value)}
-              required
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Confirmer</span>
-            <input
-              className="input"
-              type="password"
-              data-testid="confirm-password"
-              value={confirmPassword}
-              autoComplete="new-password"
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              required
-            />
-          </label>
-          {nextPassword !== '' && confirmPassword !== '' && nextPassword !== confirmPassword && (
-            <p className="feedback feedback-error">Les deux mots de passe ne sont pas identiques.</p>
-          )}
+    <Card
+      title="Membres"
+      subtitle="Chaque membre voit le même patrimoine que vous : n’invitez que des personnes de confiance."
+    >
+      {accounts.loading && accounts.data === null ? (
+        <SkeletonLines lines={3} />
+      ) : (
+        <ul className="list">
+          {(accounts.data?.accounts ?? []).map((account) => {
+            const self = account.username === session.username;
+            return (
+              <li key={account.id} className="list-row" data-testid={`account-${account.username ?? account.id}`}>
+                <span className="avatar" aria-hidden="true">
+                  {initialsOf(account.displayName ?? account.username)}
+                </span>
+                <span className="list-row-main">
+                  <strong>
+                    {account.displayName ?? account.username ?? 'Compte principal'}
+                    {self && <span className="muted"> · vous</span>}
+                  </strong>
+                  <span>
+                    {account.username === null ? 'sans identifiant' : `@${account.username}`} ·{' '}
+                    {account.role === 'OWNER' ? 'Propriétaire' : 'Membre'} ·{' '}
+                    {account.lastLoginAt === null ? 'jamais connecté' : `vu ${formatRelative(account.lastLoginAt)}`}
+                  </span>
+                </span>
+                {account.disabled && <Badge tone="danger">Désactivé</Badge>}
+                {!self && (
+                  <span className="page-actions">
+                    <button type="button" className="btn btn-ghost" onClick={() => rotateFor(account)}>
+                      Nouveau code
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={() => toggle(account)}>
+                      {account.disabled ? 'Réactiver' : 'Désactiver'}
+                    </button>
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <h3>Ajouter un membre</h3>
+      <form className="form-grid" onSubmit={submit}>
+        <TextField
+          label="Identifiant"
+          value={newUsername}
+          onChange={setNewUsername}
+          data-testid="new-account-username"
+          autoCapitalize="none"
+          spellCheck={false}
+          required
+        />
+        <TextField label="Nom (facultatif)" value={newDisplayName} onChange={setNewDisplayName} />
+        <TextField label="E-mail (facultatif)" type="email" value={newEmail} onChange={setNewEmail} />
+        <PasswordField
+          label="Mot de passe provisoire"
+          value={newAccountPassword}
+          onChange={setNewAccountPassword}
+          data-testid="new-account-password"
+          autoComplete="new-password"
+          showStrength
+          required
+        />
+        {ownerNeedsUsername && (
+          <TextField
+            label="Votre identifiant (à choisir d’abord)"
+            value={ownerUsername}
+            onChange={setOwnerUsername}
+            data-testid="owner-username"
+            autoCapitalize="none"
+            spellCheck={false}
+            hint="Votre compte n’a pas encore d’identifiant : il en faut un dès qu’il y a plusieurs comptes."
+            required
+          />
+        )}
+        <div className="card-actions-row">
           <button
             type="submit"
             className="btn btn-primary"
-            data-testid="change-password"
-            disabled={
-              password.pending ||
-              currentPassword === '' ||
-              nextPassword === '' ||
-              nextPassword !== confirmPassword
-            }
+            data-testid="create-account"
+            disabled={create.pending || newUsername.trim().length < 3 || newAccountPassword.length < MIN_PASSWORD_LENGTH}
           >
-            Remplacer mon mot de passe
+            {create.pending ? 'Création…' : 'Créer le compte'}
           </button>
-          <ActionFeedback state={password} />
-          <p className="muted small">
-            Un changement de mot de passe déconnecte <strong>toutes</strong> les sessions et émet un
-            nouveau code de récupération : l’ancien cesse immédiatement de fonctionner.
-          </p>
-        </form>
-      </Card>
+          <ActionFeedback state={create} />
+        </div>
+      </form>
+    </Card>
+  );
+}
 
-      {isOwner && (
-        <Card
-          title="Comptes"
-          subtitle="Un compte supplémentaire ouvre le même patrimoine : les données ne sont pas séparées par utilisateur."
-        >
-          {accounts.loading && accounts.data === null ? (
-            <SkeletonLines lines={4} />
-          ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Identifiant</th>
-                    <th>Rôle</th>
-                    <th>État</th>
-                    <th>Dernière connexion</th>
-                    <th>Code</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {(accounts.data?.accounts ?? []).map((account) => (
-                    <tr key={account.id} data-testid={`account-${account.username ?? account.id}`}>
-                      <td>
-                        <strong>{account.username ?? '(sans identifiant)'}</strong>
-                        {account.displayName !== null && (
-                          <span className="muted small"> — {account.displayName}</span>
-                        )}
-                      </td>
-                      <td>{account.role === 'OWNER' ? 'Propriétaire' : 'Membre'}</td>
-                      <td>
-                        <Badge tone={account.disabled ? 'danger' : 'ok'}>
-                          {account.disabled ? 'Désactivé' : 'Actif'}
-                        </Badge>
-                      </td>
-                      <td>{account.lastLoginAt === null ? 'jamais' : formatDate(account.lastLoginAt)}</td>
-                      <td>
-                        {account.hasRecoveryCode ? (
-                          <span className="muted small">défini (non relisible)</span>
-                        ) : (
-                          <span className="tone-down">absent</span>
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          onClick={() => rotateCode(account)}
-                        >
-                          Nouveau code
-                        </button>
-                        {account.username !== session?.username && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => toggleAccount(account)}
-                          >
-                            {account.disabled ? 'Réactiver' : 'Désactiver'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <h3>Ajouter un compte</h3>
-          <form onSubmit={submitCreate}>
-            <label className="field">
-              <span className="field-label">Identifiant (3 à 32 caractères, minuscules)</span>
-              <input
-                className="input"
-                type="text"
-                data-testid="new-account-username"
-                value={newUsername}
-                autoCapitalize="none"
-                spellCheck={false}
-                onChange={(event) => setNewUsername(event.target.value)}
-                required
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Nom affiché (facultatif)</span>
-              <input
-                className="input"
-                type="text"
-                value={newDisplayName}
-                onChange={(event) => setNewDisplayName(event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Mot de passe du nouveau compte (10 caractères minimum)</span>
-              <input
-                className="input"
-                type="password"
-                data-testid="new-account-password"
-                value={newAccountPassword}
-                autoComplete="new-password"
-                onChange={(event) => setNewAccountPassword(event.target.value)}
-                required
-              />
-            </label>
-            {ownerNeedsUsername && (
-              <label className="field">
-                <span className="field-label">
-                  Votre identifiant (obligatoire : vous n’en avez pas encore)
-                </span>
-                <input
-                  className="input"
-                  type="text"
-                  data-testid="owner-username"
-                  value={ownerUsername}
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  onChange={(event) => setOwnerUsername(event.target.value)}
-                  required
-                />
-              </label>
-            )}
-            <button
-              type="submit"
-              className="btn btn-primary"
-              data-testid="create-account"
-              disabled={create.pending || newUsername === '' || newAccountPassword === ''}
-            >
-              Créer le compte
-            </button>
-            <ActionFeedback state={create} />
-          </form>
-
-          <p className="muted small">
-            {accounts.data?.accounts.length ?? 0} compte(s) · hachage Argon2id (m=19456 KiB, t=2, p=1) ·
-            code de récupération en SHA-256, jamais relisible.
-          </p>
-        </Card>
-      )}
+/** Ancienne API du module : conservée pour les imports existants. */
+export function AccountsPanel() {
+  return (
+    <>
+      <PasswordPanel />
+      <MembersPanel />
     </>
   );
 }

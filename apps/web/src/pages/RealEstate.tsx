@@ -57,7 +57,7 @@ export function RealEstatePage() {
 
   return (
     <>
-      <PageHeader title="Immobilier" subtitle="Biens locatifs, crédits en cours et cash-flow après échéance." />
+      <PageHeader title="Immobilier" subtitle="Vos biens, leurs crédits et ce qu’ils rapportent chaque mois." />
       <AsyncView
         loading={state.loading}
         error={state.error}
@@ -75,7 +75,7 @@ export function RealEstatePage() {
             {data.properties.length === 0 && (
               <EmptyState
                 title="Aucun bien"
-                hint="Déclarez un bien ci-dessous : il apparaîtra ici avec son crédit et ses loyers."
+                hint="Ajoutez un bien ci-dessous : il apparaîtra ici avec son crédit et ses loyers."
               />
             )}
 
@@ -96,14 +96,14 @@ export function RealEstatePage() {
             ))}
 
             <Grid className="grid-2">
-              <Card title="Amortissement du premier crédit" subtitle="Intérêts et capital par échéance annuelle.">
+              <Card title="Amortissement du premier crédit" subtitle="Part d’intérêts et de capital, année par année.">
                 <BarChart items={annualAmortization(firstProperty)} months={false} ariaLabel="Amortissement annuel" />
                 <p className="muted small">
                   {amortization.length} échéances modélisées
                   {loanEnd === null ? '' : ` · fin du prêt ${formatDate(loanEnd)}`}
                 </p>
               </Card>
-              <Card title="Flux de trésorerie déclarés" subtitle="Loyers, charges, taxes et assurances récurrents.">
+              <Card title="Flux de trésorerie déclarés" subtitle="Loyers, charges, taxes et assurances.">
                 <DataTable
                   rows={properties.flatMap((property) => property.cashFlows)}
                   columns={cashFlowColumns}

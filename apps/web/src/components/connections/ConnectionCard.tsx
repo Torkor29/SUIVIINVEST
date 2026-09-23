@@ -30,9 +30,58 @@ export interface ConnectionCardProps {
   readonly onShowRuns: (connectionId: string) => void;
 }
 
+/**
+ * Identifiants demandés à la connexion, par source.
+ *
+ * `secret` = chiffré sur le serveur (AES-256-GCM), jamais réaffiché ;
+ * `config` = paramètre non secret. Les noms sont ceux que lisent les connecteurs.
+ */
+interface CredentialField {
+  readonly key: string;
+  readonly label: string;
+  readonly kind: 'secret' | 'config';
+  readonly type?: 'text' | 'password' | 'tel';
+  readonly optional?: boolean;
+  readonly hint?: string;
+  readonly placeholder?: string;
+}
+
+const CREDENTIAL_FIELDS: Readonly<Record<string, readonly CredentialField[]>> = {
+  degiro: [
+    { key: 'degiro_username', label: 'Identifiant DEGIRO', kind: 'secret', type: 'text' },
+    { key: 'degiro_password', label: 'Mot de passe DEGIRO', kind: 'secret', type: 'password' },
+    {
+      key: 'degiro_totp_secret_key',
+      label: 'Clé de double authentification (facultatif)',
+      kind: 'secret',
+      type: 'password',
+      optional: true,
+      hint: 'La clé secrète TOTP de votre application d’authentification, si la double authentification est activée.',
+    },
+    {
+      key: 'degiro_int_account',
+      label: 'Numéro de compte interne (facultatif)',
+      kind: 'config',
+      optional: true,
+      hint: 'Détecté automatiquement en général.',
+    },
+  ],
+  trade_republic: [
+    {
+      key: 'trade_republic_phone',
+      label: 'Numéro de téléphone',
+      kind: 'secret',
+      type: 'tel',
+      placeholder: '+33612345678',
+      hint: 'Au format international, celui de votre compte Trade Republic.',
+    },
+    { key: 'trade_republic_pin', label: 'Code PIN', kind: 'secret', type: 'password', placeholder: '••••' },
+  ],
+};
+
 /** Libellés des paramètres non secrets attendus par les connecteurs. */
 const CONFIG_LABELS: Readonly<Record<string, string>> = {
-  address: 'Adresse publique (0x…)',
+  address: 'Adresse publique du wallet (0x…)',
   networks: 'Chaînes suivies (séparées par des virgules)',
   region: 'Région',
   environment: 'Environnement',
@@ -68,6 +117,13 @@ export function ConnectionCard({
   const [showImport, setShowImport] = useState(false);
   const [label, setLabel] = useState(source.providerName);
   const [config, setConfig] = useState<Record<string, string>>({});
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
+  const credentialFields = CREDENTIAL_FIELDS[source.providerId] ?? [];
+  const missingCredential = credentialFields.some(
+    (field) =>
+      field.optional !== true &&
+      ((field.kind === 'secret' ? secretValues[field.key] : config[field.key]) ?? '').trim() === '',
+  );
   const [outcome, setOutcome] = useState<SyncOutcomeDto | null>(null);
   const [testResult, setTestResult] = useState<ConnectionTestResultDto | null>(null);
 
@@ -81,22 +137,33 @@ export function ConnectionCard({
   const canImport = (connection?.importFormats.length ?? 0) > 0 || source.providerId === 'trade_republic';
 
   const runConnect = (): void => {
+    const cleanConfig = Object.fromEntries(Object.entries(config).filter(([, value]) => value.trim() !== ''));
+    const cleanSecrets = Object.fromEntries(Object.entries(secretValues).filter(([, value]) => value.trim() !== ''));
     void connect.run(async () => {
-      const created = await request<{
-        readonly id: string;
-        readonly providerId: string;
-      }>('/api/connections', {
-        method: 'POST',
-        json: {
-          providerId: source.providerId,
-          label: label.trim() === '' ? source.providerName : label.trim(),
-          config,
-          secrets: {},
-        },
-      });
+      if (connection === null) {
+        await request<{ readonly id: string }>('/api/connections', {
+          method: 'POST',
+          json: {
+            providerId: source.providerId,
+            label: label.trim() === '' ? source.providerName : label.trim(),
+            config: cleanConfig,
+            secrets: cleanSecrets,
+          },
+        });
+      } else {
+        // Reconnexion : on remplace les identifiants, l'historique est conservé.
+        await request<{ readonly id: string }>(`/api/connections/${connection.id}`, {
+          method: 'PATCH',
+          json: { config: cleanConfig, secrets: cleanSecrets },
+        });
+      }
       setShowConnect(false);
+      // Les identifiants ne restent pas dans le navigateur une fois envoyés.
+      setSecretValues({});
       onChanged();
-      return `Connexion ${source.providerName} enregistrée (${created.id}).`;
+      return connection === null
+        ? `${source.providerName} connecté. Lancez une synchronisation pour récupérer vos données.`
+        : `Identifiants ${source.providerName} mis à jour.`;
     });
   };
 
@@ -251,11 +318,13 @@ export function ConnectionCard({
 
         {showConnect && (
           <div className="conn-form" data-testid="connection-connect-form">
-            <label className="field">
-              <span className="field-label">Nom de la connexion</span>
-              <input className="input" value={label} onChange={(event) => setLabel(event.target.value)} />
-            </label>
-            {configKeys.map((key) => (
+            {connection === null && (
+              <label className="field">
+                <span className="field-label">Nom de la connexion</span>
+                <input className="input" value={label} onChange={(event) => setLabel(event.target.value)} />
+              </label>
+            )}
+            {(connection === null ? configKeys : []).map((key) => (
               <label className="field" key={key}>
                 <span className="field-label">{configLabel(key)}</span>
                 <input
@@ -271,12 +340,43 @@ export function ConnectionCard({
                 />
               </label>
             ))}
+            {credentialFields.map((field) => (
+              <label className="field" key={field.key}>
+                <span className="field-label">{field.label}</span>
+                <input
+                  className="input"
+                  data-testid={`connection-credential-${field.key}`}
+                  type={field.type ?? 'text'}
+                  autoComplete={field.type === 'password' ? 'new-password' : 'off'}
+                  placeholder={field.placeholder}
+                  value={(field.kind === 'secret' ? secretValues[field.key] : config[field.key]) ?? ''}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (field.kind === 'secret') setSecretValues((current) => ({ ...current, [field.key]: value }));
+                    else setConfig((current) => ({ ...current, [field.key]: value }));
+                  }}
+                />
+                {field.hint !== undefined && <span className="field-hint">{field.hint}</span>}
+              </label>
+            ))}
+            {credentialFields.some((field) => field.kind === 'secret') && (
+              <p className="muted small">
+                Vos identifiants sont chiffrés sur votre serveur et ne sont jamais réaffichés. Accès en lecture seule :
+                aucun ordre ni virement n’est possible.
+              </p>
+            )}
+            {connection === null && source.importOnly === true && (
+              <p className="muted small">
+                {source.providerName} ne propose pas d’accès automatique pour les particuliers : la connexion sert à
+                rattacher vos imports de relevés.
+              </p>
+            )}
             <div className="card-actions-row">
               <button
                 type="button"
                 className="btn btn-primary"
                 data-testid="connection-connect-submit"
-                disabled={connect.pending}
+                disabled={connect.pending || missingCredential}
                 onClick={runConnect}
               >
                 {connect.pending ? 'Enregistrement…' : 'Enregistrer la connexion'}
@@ -310,47 +410,20 @@ export function ConnectionCard({
               Connecter
             </button>
           ) : (
-            <>
-              <button
-                type="button"
-                className="btn btn-primary"
-                data-testid="connection-sync"
-                disabled={sync.pending}
-                onClick={runSync}
-              >
-                {sync.pending ? 'Synchronisation…' : 'Synchroniser'}
-              </button>
-              {needsReconnect && (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  data-testid="connection-reconnect"
-                  onClick={() => setShowConnect((current) => !current)}
-                >
-                  Reconnecter
-                </button>
-              )}
-              <button type="button" className="btn btn-ghost" onClick={runTest} disabled={test.pending}>
-                {test.pending ? 'Test en cours…' : 'Tester'}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={() => onShowRuns(connection.id)}>
-                Historique
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger"
-                data-testid="connection-disconnect"
-                disabled={remove.pending}
-                onClick={runDelete}
-              >
-                {remove.pending ? 'Suppression…' : 'Déconnecter'}
-              </button>
-            </>
+            <button
+              type="button"
+              className="btn btn-primary"
+              data-testid="connection-sync"
+              disabled={sync.pending}
+              onClick={runSync}
+            >
+              {sync.pending ? 'Synchronisation…' : 'Synchroniser'}
+            </button>
           )}
           {canImport && (
             <button
               type="button"
-              className="btn btn-ghost"
+              className="btn"
               data-testid="connection-import"
               onClick={() => setShowImport((current) => !current)}
             >
@@ -358,6 +431,35 @@ export function ConnectionCard({
             </button>
           )}
         </div>
+        {connection !== null && (
+          <div className="conn-links">
+            {(needsReconnect || credentialFields.length > 0) && (
+              <button
+                type="button"
+                className="btn btn-link"
+                data-testid="connection-reconnect"
+                onClick={() => setShowConnect((current) => !current)}
+              >
+                {needsReconnect ? 'Reconnecter' : 'Modifier les identifiants'}
+              </button>
+            )}
+            <button type="button" className="btn btn-link" onClick={runTest} disabled={test.pending}>
+              {test.pending ? 'Test…' : 'Tester'}
+            </button>
+            <button type="button" className="btn btn-link" onClick={() => onShowRuns(connection.id)}>
+              Historique
+            </button>
+            <button
+              type="button"
+              className="btn btn-link tone-down"
+              data-testid="connection-disconnect"
+              disabled={remove.pending}
+              onClick={runDelete}
+            >
+              {remove.pending ? 'Suppression…' : 'Supprimer'}
+            </button>
+          </div>
+        )}
 
         <details className="tech-details">
           <summary>Détail technique de la connexion</summary>
