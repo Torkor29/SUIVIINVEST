@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { ConnectionDto, ConnectionTestResultDto, SyncOutcomeDto } from '@suiviinvest/api-contract';
-import { request } from '../../lib/api.ts';
+import type { ConnectionDto, ConnectionTestResultDto, SyncOutcomeDto, SyncRunDto } from '@suiviinvest/api-contract';
+import { ApiRequestError, isGatewayStatus, request } from '../../lib/api.ts';
 import { useAction } from '../../lib/useAction.ts';
 import { ActionFeedback } from '../ui/ActionFeedback.tsx';
 import { formatEur } from '../../lib/format.ts';
@@ -196,6 +196,7 @@ export function ConnectionCard({
       ((field.kind === 'secret' ? secretValues[field.key] : config[field.key]) ?? '').trim() === '',
   );
   const [outcome, setOutcome] = useState<SyncOutcomeDto | null>(null);
+  const [detached, setDetached] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResultDto | null>(null);
 
   const state = sourceStateOf(connection);
@@ -257,11 +258,36 @@ export function ConnectionCard({
   const runSync = (): void => {
     if (connection === null) return;
     setOutcome(null);
+    setDetached(false);
+    const startedAt = Date.now();
     void sync.run(async () => {
-      const result = await request<SyncOutcomeDto>(`/api/connections/${connection.id}/sync`, { method: 'POST' });
-      setOutcome(result);
-      onChanged();
-      return describeSyncOutcome(result);
+      try {
+        const result = await request<SyncOutcomeDto>(`/api/connections/${connection.id}/sync`, { method: 'POST' });
+        setOutcome(result);
+        onChanged();
+        return describeSyncOutcome(result);
+      } catch (cause) {
+        // Lien coupé (téléphone passé dans l'application du fournisseur pour
+        // valider, ou délai de la passerelle) : la synchronisation continue sur
+        // le serveur, on attend son résultat au lieu d'afficher une erreur.
+        if (!(cause instanceof ApiRequestError) || (cause.status !== 0 && !isGatewayStatus(cause.status))) throw cause;
+        setDetached(true);
+        const run = await waitForRun(connection.id, startedAt);
+        setDetached(false);
+        onChanged();
+        if (run === null) throw cause;
+        if (run.status === 'SUCCESS' || run.status === 'PARTIAL') {
+          return describeSyncOutcome({
+            created: run.created,
+            updated: run.updated,
+            skipped: run.skipped,
+            errors: run.errors,
+            durationMs: run.durationMs ?? 0,
+            status: run.status,
+          });
+        }
+        throw new Error(run.message ?? 'La synchronisation a échoué.');
+      }
     });
   };
 
@@ -329,14 +355,16 @@ export function ConnectionCard({
 
         {state.key === 'AUTH_REQUIRED' && (
           <p className="feedback feedback-warn" data-testid="connection-auth-required">
-            Validation {source.providerName} requise : ouvrez l’application du fournisseur, approuvez la connexion, puis
-            cliquez sur « Reconnecter ».
+            Validation {source.providerName} requise : cliquez sur « Synchroniser », puis acceptez aussitôt la demande
+            qui arrive dans l’application {source.providerName} (vous avez environ 1 minute).
           </p>
         )}
 
         {sync.pending && (
           <p className="feedback feedback-ok" data-testid="connection-sync-progress">
-            {syncRunningLabel(source.providerName)}
+            {detached
+              ? 'La page a perdu le lien avec le serveur (normal si vous étiez dans l’application du fournisseur) : la synchronisation continue, résultat dans un instant…'
+              : syncRunningLabel(source.providerName)}
           </p>
         )}
         <ActionFeedback state={sync} />
@@ -607,4 +635,23 @@ export function ConnectionCard({
       </Card>
     </div>
   );
+}
+
+/**
+ * Attend la fin d'une synchronisation lancée à `startedAt` (le serveur la
+ * poursuit même si la page a perdu la réponse). `null` si rien n'apparaît.
+ */
+async function waitForRun(connectionId: string, startedAt: number): Promise<SyncRunDto | null> {
+  const deadline = Date.now() + 180_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    try {
+      const runs = await request<readonly SyncRunDto[]>(`/api/connections/${connectionId}/runs`);
+      const run = runs.find((item) => Date.parse(item.startedAt) >= startedAt - 10_000 && item.finishedAt !== null);
+      if (run) return run;
+    } catch {
+      // Serveur encore injoignable (réseau du téléphone qui revient) : on réessaie.
+    }
+  }
+  return null;
 }

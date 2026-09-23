@@ -101,3 +101,21 @@ test('la vue wallets s’affiche (ou explique proprement son absence)', async ({
     await expect(page.getByTestId('wallets-panel')).toBeVisible();
   }
 });
+
+test('lien coupé pendant la synchronisation (passage dans l’app du fournisseur) : le résultat arrive quand même', async ({ page }) => {
+  // Connexion DEGIRO créée par le premier test de ce fichier (une seule par fournisseur).
+  await page.goto('/');
+  await gotoSection(page, 'Connexions');
+
+  // La requête part bien au serveur (qui synchronise), mais la réponse n'arrive
+  // jamais à la page : c'est ce que fait un téléphone qui change d'application.
+  await page.route(/\/api\/connections\/[^/]+\/sync$/, async (route) => {
+    await route.fetch();
+    await route.abort('failed');
+  });
+
+  const card = page.getByTestId('connection-card-degiro');
+  await card.getByTestId('connection-sync').click();
+  await expect(card.getByText(/transactions? récupérées?/)).toBeVisible({ timeout: 20_000 });
+  await expect(card.getByText(/Serveur injoignable/)).toHaveCount(0);
+});

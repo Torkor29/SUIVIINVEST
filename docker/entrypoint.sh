@@ -8,7 +8,7 @@
 #   reste prioritaire.
 set -eu
 
-mkdir -p "${HOME:-/data/home}"
+mkdir -p "${HOME:-/data/home}/.pytr" && chmod 700 "${HOME:-/data/home}/.pytr"
 
 PYTHON=/opt/sidecar-venv/bin/python
 if [ -x "$PYTHON" ]; then

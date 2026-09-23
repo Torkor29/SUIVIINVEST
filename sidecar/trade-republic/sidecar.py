@@ -255,6 +255,15 @@ def _complete_weblogin_bounded(tr: Any, timeout_seconds: float) -> None:
         raise SidecarError("MFA_REQUIRED", MFA_MESSAGE, requires_user_action=True)
 
 
+def _ensure_session_dir() -> None:
+    import os
+    from pathlib import Path
+
+    session_dir = Path.home() / ".pytr"
+    session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(session_dir, 0o700)
+
+
 def _open_api(secrets: dict, params: dict) -> Any:
     """Ouvre (ou reprend) une session de lecture seule et renvoie le client ``pytr``."""
     TradeRepublicApi = _load_library()
@@ -269,6 +278,9 @@ def _open_api(secrets: dict, params: dict) -> Any:
         )
     # Moins de 100 s : au-delà, Cloudflare coupe la requête avant la réponse.
     approval_timeout = float(params.get("approvalTimeoutSeconds") or 75)
+    # pytr enregistre la session dans ~/.pytr sans créer ce dossier : sans lui,
+    # la connexion approuvée dans l'application serait perdue aussitôt.
+    _ensure_session_dir()
     try:
         # save_cookies=True : pytr écrit ~/.pytr/cookies.<phone>.txt, SEUL état de
         # session persisté ; aucun mot de passe n'y figure.
