@@ -50,7 +50,9 @@ case "${1:-}" in
     $DOCKER compose --profile tunnel --profile tunnel-domain stop cloudflared cloudflared-domain || true
     $DOCKER compose --profile tunnel --profile tunnel-domain rm -f cloudflared cloudflared-domain || true
     sed -i '/^COMPOSE_PROFILES=/d' .env
-    echo "✔ Tunnel désactivé."
+    sed -i '/^SUIVIINVEST_BIND=/d' .env
+    $DOCKER compose up -d suiviinvest >/dev/null 2>&1 || true
+    echo "✔ Tunnel désactivé (application de nouveau joignable sur le port 9123)."
     exit 0
     ;;
   --domain)
@@ -77,6 +79,7 @@ case "${1:-}" in
     set_env SUIVIINVEST_PUBLIC_URL "$DOMAIN_URL"
     set_env SUIVIINVEST_COOKIE_SECURE true
     set_env SUIVIINVEST_TRUST_PROXY true
+    set_env SUIVIINVEST_BIND 127.0.0.1
     chmod 600 .env
     $DOCKER compose up -d suiviinvest
     $DOCKER compose --profile tunnel-domain up -d --force-recreate cloudflared-domain
@@ -145,6 +148,7 @@ fi
 set_env SUIVIINVEST_PUBLIC_URL "$URL"
 set_env SUIVIINVEST_COOKIE_SECURE true
 set_env SUIVIINVEST_TRUST_PROXY true
+set_env SUIVIINVEST_BIND 127.0.0.1
 chmod 600 .env
 $DOCKER compose up -d suiviinvest >/dev/null 2>&1
 

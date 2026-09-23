@@ -24,9 +24,9 @@ services:
       SUIVIINVEST_BACKUP_DIR: /backups
       SUIVIINVEST_WEB_DIR: /app/web
     ports:
-      # En production derrière un reverse proxy, préférez :
-      #   - "127.0.0.1:9123:9123"
-      - "9123:9123"
+      # SUIVIINVEST_BIND=127.0.0.1 (réglé par ./scripts/tunnel.sh) : l'application
+      # n'est plus joignable directement par l'IP du serveur, seulement via le tunnel.
+      - "${SUIVIINVEST_BIND:-0.0.0.0}:9123:9123"
     volumes:
       - suiviinvest-data:/data
       - suiviinvest-backups:/backups
