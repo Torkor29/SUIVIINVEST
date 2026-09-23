@@ -41,7 +41,7 @@ function IssuedCodeCard({ issued, onDone }: { readonly issued: IssuedCode; reado
  * Aucun mot de passe n'est jamais relu : il ne peut qu'être remplacé, et
  * l'actuel est exigé. Un changement déconnecte tous les appareils.
  */
-export function PasswordPanel() {
+export function PasswordPanel({ passwordSet = true }: { readonly passwordSet?: boolean } = {}) {
   const { session, refresh } = useAuth();
   const password = useAction();
   const rotate = useAction();
@@ -86,16 +86,25 @@ export function PasswordPanel() {
 
   return (
     <>
-      <Card title="Mot de passe" subtitle="Changer de mot de passe déconnecte tous vos appareils.">
+      <Card
+        title={passwordSet ? 'Mot de passe' : 'Définir un mot de passe'}
+        subtitle={
+          passwordSet
+            ? 'Changer de mot de passe déconnecte tous vos appareils.'
+            : 'Vous vous connectez avec Google. Un mot de passe vous permet aussi de vous connecter sans Google.'
+        }
+      >
         <form className="form-stack" onSubmit={submit}>
-          <PasswordField
-            label="Mot de passe actuel"
-            value={currentPassword}
-            onChange={setCurrentPassword}
-            data-testid="current-password"
-            autoComplete="current-password"
-            required
-          />
+          {passwordSet && (
+            <PasswordField
+              label="Mot de passe actuel"
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              data-testid="current-password"
+              autoComplete="current-password"
+              required
+            />
+          )}
           <PasswordField
             label="Nouveau mot de passe"
             value={nextPassword}
@@ -121,12 +130,12 @@ export function PasswordPanel() {
               data-testid="change-password"
               disabled={
                 password.pending ||
-                currentPassword === '' ||
+                (passwordSet && currentPassword === '') ||
                 nextPassword.length < MIN_PASSWORD_LENGTH ||
                 nextPassword !== confirmPassword
               }
             >
-              {password.pending ? 'Enregistrement…' : 'Changer le mot de passe'}
+              {password.pending ? 'Enregistrement…' : passwordSet ? 'Changer le mot de passe' : 'Définir le mot de passe'}
             </button>
           </div>
           <ActionFeedback state={password} />
@@ -170,6 +179,7 @@ export function MembersPanel() {
   const [newDisplayName, setNewDisplayName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newAccountPassword, setNewAccountPassword] = useState('');
+  const [googleOnly, setGoogleOnly] = useState(false);
   const [ownerUsername, setOwnerUsername] = useState('');
   const ownerNeedsUsername = session?.role === 'OWNER' && session.username === null;
 
@@ -182,12 +192,19 @@ export function MembersPanel() {
         method: 'POST',
         json: {
           username: newUsername.trim().toLowerCase(),
-          password: newAccountPassword,
+          ...(googleOnly ? {} : { password: newAccountPassword }),
           ...(newDisplayName.trim() === '' ? {} : { displayName: newDisplayName.trim() }),
           ...(newEmail.trim() === '' ? {} : { email: newEmail.trim() }),
           ...(ownerNeedsUsername && ownerUsername !== '' ? { ownerUsername: ownerUsername.trim().toLowerCase() } : {}),
         },
       });
+      if (googleOnly) {
+        setNewUsername('');
+        setNewDisplayName('');
+        setNewEmail('');
+        accounts.reload();
+        return `Invitation prête : ${result.account.displayName ?? `@${result.account.username}`} peut se connecter avec « Continuer avec Google ».`;
+      }
       setIssued({ code: result.recoveryCode, subject: `@${result.account.username ?? 'nouveau'}` });
       setNewUsername('');
       setNewDisplayName('');
@@ -250,6 +267,7 @@ export function MembersPanel() {
                     {account.lastLoginAt === null ? 'jamais connecté' : `vu ${formatRelative(account.lastLoginAt)}`}
                   </span>
                 </span>
+                {account.googleLinked === true && <Badge tone="info">Google</Badge>}
                 {account.disabled && <Badge tone="danger">Désactivé</Badge>}
                 {!self && (
                   <span className="page-actions">
@@ -279,16 +297,29 @@ export function MembersPanel() {
           required
         />
         <TextField label="Nom (facultatif)" value={newDisplayName} onChange={setNewDisplayName} />
-        <TextField label="E-mail (facultatif)" type="email" value={newEmail} onChange={setNewEmail} />
-        <PasswordField
-          label="Mot de passe provisoire"
-          value={newAccountPassword}
-          onChange={setNewAccountPassword}
-          data-testid="new-account-password"
-          autoComplete="new-password"
-          showStrength
-          required
+        <TextField
+          label={googleOnly ? 'Adresse Google (Gmail…)' : 'E-mail (facultatif)'}
+          type="email"
+          value={newEmail}
+          onChange={setNewEmail}
+          data-testid="new-account-email"
+          required={googleOnly}
         />
+        <label className="field-inline">
+          <input type="checkbox" checked={googleOnly} onChange={(event) => setGoogleOnly(event.target.checked)} data-testid="new-account-google" />
+          <span>Connexion avec Google, sans mot de passe</span>
+        </label>
+        {!googleOnly && (
+          <PasswordField
+            label="Mot de passe provisoire"
+            value={newAccountPassword}
+            onChange={setNewAccountPassword}
+            data-testid="new-account-password"
+            autoComplete="new-password"
+            showStrength
+            required
+          />
+        )}
         {ownerNeedsUsername && (
           <TextField
             label="Votre identifiant (à choisir d’abord)"
@@ -306,7 +337,11 @@ export function MembersPanel() {
             type="submit"
             className="btn btn-primary"
             data-testid="create-account"
-            disabled={create.pending || newUsername.trim().length < 3 || newAccountPassword.length < MIN_PASSWORD_LENGTH}
+            disabled={
+              create.pending ||
+              newUsername.trim().length < 3 ||
+              (googleOnly ? newEmail.trim() === '' : newAccountPassword.length < MIN_PASSWORD_LENGTH)
+            }
           >
             {create.pending ? 'Création…' : 'Créer le compte'}
           </button>

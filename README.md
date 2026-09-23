@@ -643,6 +643,36 @@ fermer une à distance ou de **déconnecter tous les autres appareils**.
 Une installation d'origine (un seul compte sans identifiant) continue de fonctionner au mot de
 passe seul ; donnez-vous un identifiant dans **Profil** pour passer au fonctionnement normal.
 
+### Connexion avec Google
+
+« Continuer avec Google » s'ajoute au mot de passe (il ne le remplace pas).
+
+**Activer (une fois, par le propriétaire)** : Paramètres → *Connexion avec Google*, qui affiche
+les deux adresses à déclarer.
+
+1. <https://console.cloud.google.com/auth/clients> (créez un projet si besoin ; à la première
+   visite, Google demande de configurer l'écran de consentement : type **Externe**, nom
+   « SuiviInvest », votre e-mail).
+2. **Créer un client** → type **Application Web** :
+   - Origines JavaScript autorisées : `https://suivi-invest.click`
+   - URI de redirection autorisés : `https://suivi-invest.click/api/auth/google/callback`
+3. Copiez l'**ID client** et le **code secret** dans Paramètres → *Activer*. (Ou dans `.env` :
+   `SUIVIINVEST_GOOGLE_CLIENT_ID` et `SUIVIINVEST_GOOGLE_CLIENT_SECRET`.)
+
+**Qui peut entrer** — le patrimoine est commun à tous les comptes, l'inscription n'est donc pas
+ouverte à n'importe quel compte Google :
+
+- au premier lancement, « Créer mon compte avec Google » crée le compte **propriétaire** ;
+- un compte existant dont l'e-mail correspond (ou lié depuis Profil → *Lier mon compte Google*) ;
+- une personne **invitée** : Profil → Membres → cocher « Connexion avec Google, sans mot de
+  passe » et saisir son adresse Google ;
+- tout autre compte Google est **refusé** (« demandez une invitation »).
+
+Sécurité : flux OpenID Connect avec PKCE, demande à usage unique liée au navigateur (cookie),
+jeton d'identité vérifié sur le serveur (signature Google, application, expiration, e-mail
+confirmé). Aucun jeton d'accès Google n'est conservé. Un compte créé via Google peut définir un
+mot de passe plus tard (Profil) ; délier Google n'est possible qu'une fois ce mot de passe défini.
+
 ### Mot de passe oublié
 
 1. **Lien par e-mail** — si l'envoi d'e-mails est configuré (`SUIVIINVEST_SMTP_URL`,

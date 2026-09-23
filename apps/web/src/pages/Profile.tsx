@@ -14,6 +14,7 @@ import { Badge } from '../components/ui/Stat.tsx';
 import { TextField } from '../components/ui/Fields.tsx';
 import { IconDevice, IconLogout, IconShield } from '../components/ui/Icons.tsx';
 import { MembersPanel, PasswordPanel } from '../components/security/AccountsPanel.tsx';
+import { GoogleLinkCard } from '../components/security/GoogleSignIn.tsx';
 
 /** Profil : identité, e-mail, sécurité, appareils connectés et membres. */
 export function ProfilePage() {
@@ -48,7 +49,8 @@ export function ProfilePage() {
             <ProfileForm profile={data} onSaved={profile.reload} />
 
             <h2 className="section-title">Sécurité</h2>
-            <PasswordPanel />
+            <GoogleLinkCard profile={data} onChanged={profile.reload} />
+            <PasswordPanel passwordSet={data.passwordSet !== false} />
             <DevicesPanel />
 
             {data.role === 'OWNER' && <MembersPanel />}

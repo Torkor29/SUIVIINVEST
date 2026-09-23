@@ -129,6 +129,16 @@ export function mockRequest(url: string, method: string, body: unknown): unknown
     return mockSession(true) satisfies SessionResponse;
   }
   if (path === '/api/auth/logout') return mockSession(false) satisfies SessionResponse;
+  if (path === '/api/auth/google/status') return { enabled: false };
+  if (path === '/api/auth/google/config') {
+    return {
+      configured: false,
+      source: null,
+      clientId: null,
+      redirectUri: `${window.location.origin}/api/auth/google/callback`,
+      origin: window.location.origin,
+    };
+  }
   if (path === '/api/auth/me') return mockProfile();
   if (path === '/api/auth/sessions') {
     return {

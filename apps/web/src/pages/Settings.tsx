@@ -9,6 +9,7 @@ import { formatDate, formatRelative, formatUptime } from '../lib/format.ts';
 import { useTheme } from '../lib/useTheme.ts';
 import type { ThemeChoice } from '../lib/theme.ts';
 import { PageHeader, Card, Grid } from '../components/ui/Card.tsx';
+import { GoogleConfigCard } from '../components/security/GoogleSignIn.tsx';
 import { AsyncView } from '../components/ui/AsyncView.tsx';
 import { SkeletonLines } from '../components/ui/Skeleton.tsx';
 import { KeyValue, Badge } from '../components/ui/Stat.tsx';
@@ -139,6 +140,8 @@ export function SettingsPage() {
                 </div>
                 <ActionFeedback state={backup} />
               </Card>
+
+              <GoogleConfigCard />
 
               <Card title="Sécurité" subtitle="Ce qui protège vos données sur le serveur.">
                 <ul className="list" data-testid="security-list">

@@ -1662,3 +1662,17 @@ a.list-row:hover {
     opacity: 0;
   }
 }
+
+/* ------------------------------------------------------------ bouton Google */
+.btn-google {
+  gap: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--elevated);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.btn-google:hover {
+  background: var(--surface-2);
+}

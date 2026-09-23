@@ -7,6 +7,7 @@ import { AuthBrand, AuthLayout } from '../components/security/AuthLayout.tsx';
 import { RecoveryCodeNotice } from '../components/security/RecoveryCodeNotice.tsx';
 import { PasswordField, TextField } from '../components/ui/Fields.tsx';
 import { IconArrowLeft, IconMail } from '../components/ui/Icons.tsx';
+import { GoogleButton, GoogleOutcome, useGoogleEnabled, useGoogleOutcome } from '../components/security/GoogleSignIn.tsx';
 
 type Mode = 'login' | 'forgot' | 'code' | 'sent';
 
@@ -60,6 +61,8 @@ function SetupForm({ onCode }: { readonly onCode: (code: string) => void }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mismatch = confirm !== '' && password !== confirm;
+  const googleEnabled = useGoogleEnabled();
+  const googleOutcome = useGoogleOutcome();
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -89,6 +92,13 @@ function SetupForm({ onCode }: { readonly onCode: (code: string) => void }) {
       <AuthBrand />
       <h1 className="login-title">Créez votre compte</h1>
       <p className="login-lead">Quelques secondes suffisent. Ce compte sera le propriétaire de l’application.</p>
+      <GoogleOutcome outcome={googleOutcome} />
+      {googleEnabled && (
+        <>
+          <GoogleButton label="Créer mon compte avec Google" />
+          <div className="login-divider">ou avec un mot de passe</div>
+        </>
+      )}
 
       <TextField label="Prénom ou nom" value={displayName} onChange={setDisplayName} autoComplete="name" />
       <TextField
@@ -162,6 +172,8 @@ function SignInFlow({ onCode }: { readonly onCode: (code: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   const usernameRequired = session?.usernameRequired ?? false;
   const emailAvailable = session?.emailResetAvailable ?? false;
+  const googleEnabled = useGoogleEnabled();
+  const googleOutcome = useGoogleOutcome();
 
   const go = (next: Mode): void => {
     setMode(next);
@@ -343,6 +355,13 @@ function SignInFlow({ onCode }: { readonly onCode: (code: string) => void }) {
       <AuthBrand />
       <h1 className="login-title">Bon retour</h1>
       <p className="login-lead">Connectez-vous pour retrouver votre patrimoine.</p>
+      <GoogleOutcome outcome={googleOutcome} />
+      {googleEnabled && (
+        <>
+          <GoogleButton />
+          <div className="login-divider">ou</div>
+        </>
+      )}
       {usernameRequired && (
         <TextField
           label="Identifiant ou e-mail"
