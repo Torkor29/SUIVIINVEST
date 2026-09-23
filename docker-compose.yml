@@ -50,6 +50,24 @@ services:
     cap_drop:
       - ALL
 
+  # Tunnel Cloudflare (facultatif) : adresse HTTPS publique sans ouvrir de port.
+  # Activé par ./scripts/tunnel.sh (COMPOSE_PROFILES=tunnel dans .env).
+  # Adresse « trycloudflare.com » temporaire : elle change si ce conteneur
+  # redémarre ; ./scripts/tunnel.sh affiche toujours l'adresse en cours.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: suiviinvest-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://suiviinvest:9123
+    depends_on:
+      - suiviinvest
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 volumes:
   suiviinvest-data:
     name: suiviinvest-data

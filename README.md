@@ -174,19 +174,20 @@ Ensuite, à chaque nouvelle version poussée sur GitHub :
 /opt/suiviinvest/scripts/update.sh --auto          # ou : automatique, toutes les 15 min
 ```
 
-### Adresse Cloudflare (tunnel)
+### Adresse Cloudflare (tunnel permanent)
 
-Un tunnel Cloudflare (`cloudflared tunnel --url http://localhost:9123`) fournit une adresse
-HTTPS : l'application l'accepte telle quelle, même si elle change à chaque redémarrage du
-tunnel. Passez simplement la nouvelle adresse à la mise à jour pour que les liens envoyés
-par e-mail soient justes :
+Pour une adresse HTTPS publique sans ouvrir de port :
 
 ```bash
-/opt/suiviinvest/scripts/update.sh https://nouvelle-adresse.trycloudflare.com
+/opt/suiviinvest/scripts/tunnel.sh
 ```
 
-Une adresse **temporaire** (`trycloudflare.com`) change à chaque redémarrage de
-`cloudflared` ; pour une adresse fixe, créez un tunnel nommé rattaché à votre domaine.
+Le tunnel tourne dans un conteneur `suiviinvest-tunnel` qui redémarre tout seul (y compris
+après un redémarrage du serveur) ; le script affiche l'adresse et la règle dans `.env`.
+Une adresse **temporaire** `trycloudflare.com` change quand ce conteneur redémarre :
+`./scripts/tunnel.sh --url` l'affiche, `./scripts/tunnel.sh` la remet à jour. L'application
+accepte n'importe quelle adresse ; pour une adresse fixe, créez un tunnel nommé rattaché à
+votre domaine. Désactivation : `./scripts/tunnel.sh --off`.
 
 ---
 
