@@ -57,6 +57,12 @@ export interface AppConfig {
   readonly mailFrom: string | null;
   /** Adresse publique de l'application, pour construire les liens envoyés par e-mail. */
   readonly publicUrl: string | null;
+  /**
+   * Adresse de retour après autorisation bancaire (Enable Banking). Par défaut :
+   * adresse publique + /connexions/banque. Elle doit être déclarée à l'identique
+   * dans l'application Enable Banking.
+   */
+  readonly enableBankingRedirectUrl: string | null;
   /** Chiffre les sauvegardes sur le disque avec une clé dérivée de la clé maîtresse. */
   readonly backupEncryption: boolean;
 }
@@ -172,6 +178,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     mailFrom: nonEmpty(env.SUIVIINVEST_MAIL_FROM),
     publicUrl: nonEmpty(env.SUIVIINVEST_PUBLIC_URL)?.replace(/\/+$/, '') ?? null,
     backupEncryption: parseBoolean(env.SUIVIINVEST_BACKUP_ENCRYPTION, true),
+    enableBankingRedirectUrl: nonEmpty(env.SUIVIINVEST_ENABLEBANKING_REDIRECT_URL),
   };
 }
 

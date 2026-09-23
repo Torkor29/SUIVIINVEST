@@ -35,9 +35,23 @@ test('registre : rejette un identifiant de connecteur en doublon', () => {
   assert.doesNotThrow(() => createDefaultRegistry([]));
 });
 
+/** Sources à API officielle ou publique : pas de repli fichier requis. */
+const OFFICIAL_API_SOURCES: ReadonlySet<string> = new Set([
+  'enable_banking',
+  'bitcoin',
+  'solana',
+  'binance',
+  'kraken',
+  'coinbase',
+  'bitpanda',
+]);
+
 test('registre : résolution par identifiant et erreur explicite si absent', () => {
   const registry = createDefaultRegistry();
-  assert.equal(registry.list().length, 6);
+  assert.equal(registry.list().length, 13);
+  for (const id of ['enable_banking', 'bitcoin', 'solana', 'binance', 'kraken', 'coinbase', 'bitpanda'] as const) {
+    assert.equal(registry.get(id)?.id, id);
+  }
   assert.equal(registry.get('degiro')?.displayName, 'DEGIRO');
   assert.equal(registry.get('trade_republic')?.id, 'trade_republic');
   assert.equal(registry.get('credit_agricole')?.id, 'credit_agricole');
@@ -80,7 +94,14 @@ test('registre : chaque connecteur déclare des formats uniques et non vides', (
     seenConnectors.add(connector.id);
 
     assert.ok(connector.displayName.length > 0);
-    assert.ok(connector.importFormats.length > 0, `${connector.id} n'a aucun format d'import`);
+    // Le repli par fichier est obligatoire pour les sources à API privée ou
+    // fragile. Les sources à API officielle (open banking, plateformes) ou
+    // publique (blockchains) n'en ont pas besoin : elles ne peuvent pas « casser ».
+    if (!OFFICIAL_API_SOURCES.has(connector.id)) {
+      assert.ok(connector.importFormats.length > 0, `${connector.id} n'a aucun format d'import`);
+    } else {
+      assert.equal(connector.capabilities.api, true, `${connector.id} sans fichier doit avoir une API`);
+    }
     for (const format of connector.importFormats) {
       assert.equal(seenFormats.has(format.id), false, `format d'import en doublon : ${format.id}`);
       seenFormats.add(format.id);
@@ -139,10 +160,16 @@ test('sécurité : le socle des providers ne contient aucune primitive d\'écrit
 });
 
 test('sécurité : aucun connecteur n\'exige un secret de type clé privée', () => {
+  // Autorisés : identifiants d'API explicitement nommés (clé de lecture d'une
+  // plateforme, session d'accès bancaire). Interdits : phrase de récupération,
+  // clé privée de wallet, mot de passe ou PIN exigés d'office.
+  const apiCredential = /_api_(key|secret|key_name|private_key)$|_session_id$/;
   for (const connector of builtInConnectors) {
     for (const secret of connector.requiredSecrets) {
+      assert.equal(/seed|mnemonic/i.test(secret), false, `${connector.id} exige une phrase de récupération : ${secret}`);
+      if (apiCredential.test(secret)) continue;
       assert.equal(
-        /private|seed|mnemonic|password|pin|key/i.test(secret),
+        /private|password|pin|key/i.test(secret),
         false,
         `${connector.id} exige un secret sensible : ${secret}`,
       );
@@ -164,6 +191,13 @@ test('capacités : `api` est déclaré honnêtement pour chaque connecteur', () 
     credit_agricole: false,
     revolut: false,
     metamask: true,
+    enable_banking: true,
+    bitcoin: true,
+    solana: true,
+    binance: true,
+    kraken: true,
+    coinbase: true,
+    bitpanda: true,
     manual: false,
   };
   for (const connector of builtInConnectors) {

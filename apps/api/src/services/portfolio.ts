@@ -105,7 +105,14 @@ const PROVIDER_LABELS: Record<string, string> = {
   trade_republic: 'Trade Republic',
   credit_agricole: 'Crédit Agricole',
   revolut: 'Revolut',
-  metamask: 'MetaMask',
+  metamask: 'Wallets EVM',
+  enable_banking: 'Banques',
+  bitcoin: 'Bitcoin',
+  solana: 'Solana',
+  binance: 'Binance',
+  kraken: 'Kraken',
+  coinbase: 'Coinbase',
+  bitpanda: 'Bitpanda',
   manual: 'Saisie manuelle',
   csv: 'Imports',
 };
@@ -763,6 +770,29 @@ export class PortfolioService {
     const points: NetWorthPoint[] = [];
     let cursor = 0;
 
+    // Comptes dont la source déclare un solde (banques) : la courbe est ancrée sur
+    // ces soldes, les opérations ne servent qu'à relier deux relevés.
+    const anchors = new Map<string, { date: string; offset: number }[]>();
+    for (const account of accounts) {
+      if (account.type !== 'CASH') continue;
+      const declared = this.#valuations.declaredCashBalances(account.id);
+      if (declared.length === 0) continue;
+      anchors.set(
+        account.id,
+        declared.map((row) => ({ date: row.date, offset: round(row.value - this.#activities.cashBalance(account.id, row.date)) })),
+      );
+    }
+    const cashOffset = (accountId: string, day: string): number => {
+      const list = anchors.get(accountId);
+      if (!list || list.length === 0) return 0;
+      let chosen = list[0] as { date: string; offset: number };
+      for (const anchor of list) {
+        if (anchor.date <= day) chosen = anchor;
+        else break;
+      }
+      return chosen.offset;
+    };
+
     const propertyValues = new Map<string, number>();
     for (const accountId of propertyIds) {
       const loaded = this.#properties.load(accountId);
@@ -803,7 +833,7 @@ export class PortfolioService {
       for (const account of accounts) {
         let value = 0;
         if (account.type === 'CASH' || account.type === 'LIABILITY') {
-          value = cash.get(account.id) ?? 0;
+          value = round((cash.get(account.id) ?? 0) + cashOffset(account.id, day));
         } else if (account.type === 'REAL_ESTATE') {
           value = propertyValues.get(account.id) ?? 0;
         } else {
@@ -882,13 +912,29 @@ export class PortfolioService {
     }
   }
 
+  /**
+   * Trésorerie d'un compte : dernier solde déclaré par la source (s'il existe)
+   * ajusté des opérations postérieures ; sinon, somme des opérations.
+   */
+  #anchoredCash(accountId: string, asOf: string): number {
+    const declared = this.#valuations.declaredCashBalances(accountId);
+    const computed = this.#activities.cashBalance(accountId, asOf);
+    if (declared.length === 0) return computed;
+    let chosen = declared[0] as { date: string; value: number };
+    for (const row of declared) {
+      if (row.date <= asOf) chosen = row;
+      else break;
+    }
+    return round(chosen.value + (computed - this.#activities.cashBalance(accountId, chosen.date)));
+  }
+
   #accountValue(
     account: AccountRow,
     latestQuotes: Map<string, { date: string; close: number; currency: string }>,
     today: string,
   ): { value: number; cash: number; invested: number; unrealizedPnl: number; realizedPnl: number } {
     if (account.type === 'CASH') {
-      const cash = this.#activities.cashBalance(account.id, today);
+      const cash = this.#anchoredCash(account.id, today);
       return { value: cash, cash, invested: 0, unrealizedPnl: 0, realizedPnl: 0 };
     }
     if (account.type === 'LIABILITY') {
@@ -947,6 +993,9 @@ export class PortfolioService {
           const price = quote ? quote.close : position.unitPrice;
           value += price === null ? position.value : position.quantity * price;
         }
+        // Euros détenus sur la plateforme (solde déclaré, hors positions).
+        const eurCash = this.#valuations.declaredCashBalances(account.id).at(-1)?.value ?? 0;
+        value += eurCash;
         // Aucun coût de revient n'est fourni par un scan d'adresse : la
         // plus-value latente reste celle reconstituée depuis l'historique.
         return {

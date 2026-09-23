@@ -109,6 +109,7 @@ export interface TestAppOptions {
   readonly providers?: Parameters<typeof buildApp>[0]['providers'];
   readonly env?: Record<string, string>;
   readonly mailer?: Mailer;
+  readonly connectorHttp?: Parameters<typeof buildApp>[0]['connectorHttp'];
 }
 
 export async function createTestApp(options: TestAppOptions = {}): Promise<TestContext> {
@@ -135,6 +136,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
     logger: createSilentLogger(),
     registry,
     ...(options.mailer ? { mailer: options.mailer } : {}),
+    ...(options.connectorHttp ? { connectorHttp: options.connectorHttp } : {}),
     providers: options.providers ?? [
       new StaticPriceProvider({
         quotes: { unset: [] },
@@ -185,7 +187,7 @@ export async function authRequest(
   context: TestContext,
   session: { cookie: string; csrfToken: string },
   options: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     url: string;
     payload?: Record<string, unknown>;
   },

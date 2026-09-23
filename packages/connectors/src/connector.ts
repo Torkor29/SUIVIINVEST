@@ -10,9 +10,11 @@ import type { AccountType, ActivityType, AssetKind, ProviderId, SyncStatus } fro
  * 2. **Read-only absolu.** Un connecteur n'expose ni ordre, ni virement, ni
  *    signature. Le type `Connector` ne contient donc aucune méthode d'écriture
  *    vers le fournisseur : il est impossible d'en ajouter une par accident.
- * 3. **Mode fichier obligatoire.** Chaque connecteur déclare au moins un
- *    `ImportFormat` : même si l'API privée casse (DEGIRO, Trade Republic, CA),
- *    l'utilisateur conserve un chemin de données via CSV.
+ * 3. **Mode fichier obligatoire pour les API fragiles.** Un connecteur à API
+ *    privée ou non officielle déclare au moins un `ImportFormat` : si l'API
+ *    casse (DEGIRO, Trade Republic, CA), l'utilisateur garde un chemin via CSV.
+ *    Les sources à API officielle (open banking, plateformes crypto) ou
+ *    publique (blockchains) en sont dispensées.
  * 4. **Testable hors ligne.** Tout passe par `ctx.http` et `ctx.now`, injectés :
  *    les tests CI n'ont jamais besoin d'identifiants réels.
  */
@@ -267,6 +269,11 @@ export interface ConnectorCapabilities {
   readonly income: boolean;
   /** `true` si la source expose une API exploitable ; `false` = import de fichiers seulement. */
   readonly api: boolean;
+  /**
+   * `true` = les positions renvoyées sont l'inventaire COMPLET du compte : un
+   * actif absent a été vendu ou transféré, sa position passe à zéro.
+   */
+  readonly completePositions?: boolean;
 }
 
 export interface Connector {

@@ -139,9 +139,11 @@ export class FakeHttpClient implements HttpClient {
     for (const route of routes) {
       const match = typeof route.match === 'string' ? new RegExp(route.match) : route.match;
       const respond =
-        typeof route.respond === 'object' && route.respond !== null && 'status' in route.respond
-          ? (route.respond as HttpResponse)
-          : ({ status: 200, headers: {}, text: JSON.stringify(route.respond) } satisfies HttpResponse);
+        typeof route.respond === 'function'
+          ? (route.respond as (url: string) => HttpResponse)
+          : typeof route.respond === 'object' && route.respond !== null && 'status' in route.respond
+            ? (route.respond as HttpResponse)
+            : ({ status: 200, headers: {}, text: JSON.stringify(route.respond) } satisfies HttpResponse);
       this.#routes.push({ match, respond });
     }
   }

@@ -19,6 +19,8 @@ import { registerAuthRoutes, sendError } from './routes/auth.ts';
 import { registerManualRoutes } from './routes/manual.ts';
 import { registerWealthRoutes } from './routes/wealth.ts';
 import { registerWalletRoutes } from './routes/wallets.ts';
+import { registerEnableBankingRoutes } from './routes/enable-banking.ts';
+import type { HttpClient } from '@suiviinvest/connectors';
 import { AuthService, SESSION_COOKIE } from './security/sessions.ts';
 import { API_RATE_LIMIT, RateLimiter } from './security/rate-limit.ts';
 import { SecretsStore } from './security/secrets.ts';
@@ -62,6 +64,8 @@ export interface AppDeps {
    */
   /** Envoi d'e-mails (tests : `MemoryMailer`). Par défaut, déduit de la configuration. */
   readonly mailer?: Mailer;
+  /** Client HTTP des routes Enable Banking et des connecteurs (tests : réponses simulées). */
+  readonly connectorHttp?: HttpClient;
   readonly schedulerState?: { current: { isRunning: () => boolean; nextRun: () => string | null; lastRun: () => string | null } | null };
 }
 
@@ -134,6 +138,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     logger,
     integrationKeys: config.integrationKeys,
     ...(sidecars ? { sidecars: { ...sidecars } } : {}),
+    ...(deps.connectorHttp ? { http: deps.connectorHttp } : {}),
   });
   const imports = new ImportService(db, { baseCurrency: config.baseCurrency, registry });
   const backup = new BackupService(db, {
@@ -172,7 +177,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       reply.header('access-control-allow-origin', origin);
       reply.header('access-control-allow-credentials', 'true');
       reply.header('access-control-allow-headers', 'content-type, x-csrf-token');
-      reply.header('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+      reply.header('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     }
     if (request.method === 'OPTIONS') {
       return reply.code(204).send();
@@ -249,6 +254,19 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   await registerManualRoutes(app, { db });
   // Portefeuilles EVM : état par chaîne et resynchronisation d'un wallet.
   await registerWalletRoutes(app, { db, sync });
+  // Banques via Enable Banking : configuration, choix de la banque, retour d'autorisation.
+  await registerEnableBankingRoutes(app, {
+    db,
+    secrets,
+    sync,
+    logger,
+    publicUrl: config.publicUrl,
+    trustProxy: config.trustProxy,
+    redirectUrl: config.enableBankingRedirectUrl,
+    integrationKeys: config.integrationKeys,
+    ...(deps.connectorHttp ? { http: deps.connectorHttp } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+  });
   await registerAdminRoutes(app, {
     db,
     registry,

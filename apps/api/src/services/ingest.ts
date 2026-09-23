@@ -14,6 +14,7 @@ import type {
 import type { Db } from '../db/database.ts';
 import { AccountRepository, InstrumentRepository, type AccountRow } from '../repositories/accounts.ts';
 import { ActivityRepository, ValuationRepository, type ActivityWriteInput } from '../repositories/activities.ts';
+import { MarketRepository } from '../repositories/market.ts';
 
 /**
  * Couche d'ingestion : le SEUL chemin d'écriture pour les données externes.
@@ -44,6 +45,8 @@ export interface IngestOptions {
    * le fichier servent alors uniquement de traçabilité (`rawSourceType`/provenance).
    */
   readonly accountIdOverride?: string | null;
+  /** Les positions sont l'inventaire complet des comptes du lot (voir `completePositions`). */
+  readonly completePositions?: boolean;
 }
 
 export interface IngestReport {
@@ -205,12 +208,34 @@ export class IngestService {
           decimals: position.decimals ?? null,
         });
         instrumentsTouched++;
-        if (position.unitPrice !== null) {
+        // Sans prix fourni par la source, on valorise au dernier cours connu ;
+        // à défaut, la quantité est tout de même enregistrée (valeur 0 et
+        // avertissement) : un wallet ne doit jamais disparaître faute de cours.
+        let unitPrice = position.unitPrice;
+        if (unitPrice === null) {
+          const quote = new MarketRepository(this.#db).latestQuote(instrument.id);
+          if (quote && quote.currency === position.currency) unitPrice = quote.close;
+        }
+        if (unitPrice === null) {
+          warnings.push(`Cours inconnu pour ${position.symbol ?? position.name} : quantité enregistrée, valeur à 0 en attendant une cotation.`);
           this.#valuations.upsert({
             accountId: account.id,
             instrumentId: instrument.id,
             date: isoDay(options.now),
-            value: Math.round(position.unitPrice * position.quantity * 1e8) / 1e8,
+            value: 0,
+            currency: position.currency,
+            source: 'CONNECTOR',
+            note: `Position ${position.rawSourceType} (sans cours)`,
+            quantity: position.quantity,
+            unitPrice: null,
+          });
+          valuationsWritten++;
+        } else {
+          this.#valuations.upsert({
+            accountId: account.id,
+            instrumentId: instrument.id,
+            date: isoDay(options.now),
+            value: Math.round(unitPrice * position.quantity * 1e8) / 1e8,
             currency: position.currency,
             source: 'CONNECTOR',
             note: `Position ${position.rawSourceType}`,
@@ -218,9 +243,44 @@ export class IngestService {
             // position ne peut pas être affichée (et un transfert natif, sans
             // adresse de contrat, ne peut pas être reconstitué depuis l'historique).
             quantity: position.quantity,
-            unitPrice: position.unitPrice,
+            unitPrice,
           });
           valuationsWritten++;
+        }
+      }
+
+      // 2 bis. inventaire complet : un actif détenu hier et absent aujourd'hui a
+      // été vendu ou transféré — sa position passe à zéro au lieu de rester figée.
+      if (options.completePositions) {
+        const present = new Set<string>();
+        for (const position of batch.positions ?? []) {
+          const account = resolveAccount(position.externalAccountId);
+          const instrument = this.#instruments.find({
+            isin: position.isin,
+            chain: position.chain ?? null,
+            contractAddress: position.contractAddress ?? null,
+            symbol: position.symbol,
+          });
+          if (account && instrument) present.add(`${account.id}|${instrument.id}`);
+        }
+        for (const normalized of batch.accounts ?? []) {
+          const account = resolveAccount(normalized.externalAccountId);
+          if (!account) continue;
+          for (const instrumentId of this.#valuations.heldInstruments(account.id)) {
+            if (present.has(`${account.id}|${instrumentId}`)) continue;
+            this.#valuations.upsert({
+              accountId: account.id,
+              instrumentId,
+              date: isoDay(options.now),
+              value: 0,
+              currency: 'EUR',
+              source: 'CONNECTOR',
+              note: 'Position soldée (absente de la source)',
+              quantity: 0,
+              unitPrice: null,
+            });
+            valuationsWritten++;
+          }
         }
       }
 

@@ -204,7 +204,10 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
     }
 
     const existingOfProvider = connections.list().filter((row) => row.provider_id === connector.id);
-    if (connector.id !== 'metamask' && connector.id !== 'manual' && existingOfProvider.length > 0) {
+    // Une seule connexion pour les courtiers et banques historiques ; plusieurs
+    // pour les wallets, plateformes crypto et banques open banking.
+    const singleInstance = ['degiro', 'trade_republic', 'credit_agricole', 'revolut'];
+    if (singleInstance.includes(connector.id) && existingOfProvider.length > 0) {
       return sendError(
         reply,
         409,

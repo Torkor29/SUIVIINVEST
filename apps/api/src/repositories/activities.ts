@@ -469,6 +469,27 @@ export class ValuationRepository {
     );
   }
 
+  /**
+   * Soldes de trésorerie déclarés par une source (banque, plateforme), par date.
+   * Ils font foi : l'historique des opérations d'une banque ne remonte que sur
+   * quelques mois et ne permet pas, seul, de retrouver le solde réel.
+   */
+  declaredCashBalances(accountId: string): { date: string; value: number }[] {
+    return this.#db.all<{ date: string; value: number }>(
+      `SELECT date, value FROM valuations
+        WHERE account_id = ? AND instrument_id IS NULL AND source = 'CONNECTOR'
+        ORDER BY date`,
+      accountId,
+    );
+  }
+
+  /** Instruments dont la dernière position connue de ce compte est non nulle. */
+  heldInstruments(accountId: string): string[] {
+    return this.latestPositionsForAccount(accountId)
+      .filter((row) => row.quantity !== null && row.quantity > 0)
+      .map((row) => row.instrumentId);
+  }
+
   latestForAccount(accountId: string): { date: string; value: number; currency: string } | null {
     const row = this.#db.get<{ date: string; value: number; currency: string }>(
       `SELECT date, value, currency FROM valuations WHERE account_id = ? AND instrument_id IS NULL

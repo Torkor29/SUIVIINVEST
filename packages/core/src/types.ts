@@ -98,6 +98,13 @@ export type ProviderId =
   | 'credit_agricole'
   | 'revolut'
   | 'metamask'
+  | 'enable_banking'
+  | 'bitcoin'
+  | 'solana'
+  | 'binance'
+  | 'kraken'
+  | 'coinbase'
+  | 'bitpanda'
   | 'manual'
   | 'csv';
 

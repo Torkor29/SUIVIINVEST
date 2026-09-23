@@ -48,6 +48,8 @@ export interface SyncServiceOptions {
   readonly integrationKeys?: Readonly<Record<string, string>>;
   /** Sidecars disponibles (DEGIRO, Trade Republic...), injectés pour être simulables en test. */
   readonly sidecars?: Readonly<Record<string, import('@suiviinvest/connectors').SidecarTransport>>;
+  /** Client HTTP des connecteurs (tests : réponses simulées). Par défaut, `fetch`. */
+  readonly http?: import('@suiviinvest/connectors').HttpClient;
 }
 
 export interface SyncOutcome {
@@ -218,6 +220,7 @@ export class SyncService {
           importId: null,
           baseCurrency: this.#options.baseCurrency,
           trigger,
+          completePositions: connector.capabilities.completePositions === true,
         },
       );
 
@@ -336,10 +339,14 @@ export class SyncService {
         get: async (name: string) => {
           const stored = await secrets.get(`${prefix}${name}`);
           if (stored !== null) return stored;
+          // Secret partagé par toutes les connexions d'un type (ex. l'application
+          // Enable Banking), saisi une fois dans l'interface.
+          const shared = await secrets.get(`global:${name}`);
+          if (shared !== null) return shared;
           return envKeys[name.toLowerCase()] ?? null;
         },
       },
-      http: new FetchHttpClient({ providerId: connector.id }),
+      http: this.#options.http ?? new FetchHttpClient({ providerId: connector.id }),
       logger: this.#options.logger,
       now: () => new Date(),
       ...(this.#options.sidecars ? { sidecars: this.#options.sidecars } : {}),
