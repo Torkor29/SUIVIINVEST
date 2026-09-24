@@ -89,7 +89,7 @@ export class CryptoService {
         const quote = latestQuotes.get(activity.instrumentId);
         if (quote) lastPrices[activity.instrumentId] = quote.close;
       }
-      const calc = computePositions({ activities: domain, lastPrices, currency: account.currency });
+      const calc = computePositions({ activities: domain, lastPrices, currency: account.currency, onInconsistency: 'clamp' });
 
       const assets = calc.positions
         .filter((position) => position.quantity > 0)

@@ -647,7 +647,11 @@ export class HoldingsService {
       if (rows.length > 0) {
         let calc;
         try {
-          calc = computePositions({ activities: rows.map((row) => toDomainActivity(row, account.currency)), currency: account.currency });
+          calc = computePositions({
+            activities: rows.map((row) => toDomainActivity(row, account.currency)),
+            currency: account.currency,
+            onInconsistency: 'clamp',
+          });
         } catch {
           continue;
         }
@@ -890,7 +894,11 @@ export class HoldingsService {
       .listForAccount(accountId)
       .filter((row) => row.instrument_id === instrumentId && row.date <= date && POSITION_TYPES.has(row.type));
     if (rows.length === 0) return 0;
-    const calc = computePositions({ activities: rows.map((row) => toDomainActivity(row, account.currency)), currency: account.currency });
+    const calc = computePositions({
+      activities: rows.map((row) => toDomainActivity(row, account.currency)),
+      currency: account.currency,
+      onInconsistency: 'clamp',
+    });
     return calc.positions.find((position) => position.instrumentId === instrumentId)?.quantity ?? 0;
   }
 

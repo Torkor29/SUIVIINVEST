@@ -262,7 +262,7 @@ export class PortfolioService {
         const quote = latestQuotes.get(activity.instrumentId);
         if (quote) lastPrices[activity.instrumentId] = quote.close;
       }
-      const calc = computePositions({ activities: domain, lastPrices, currency: account.currency });
+      const calc = computePositions({ activities: domain, lastPrices, currency: account.currency, onInconsistency: 'clamp' });
       calculations.push(calc);
 
       for (const position of calc.positions) {
@@ -304,6 +304,14 @@ export class PortfolioService {
           weightPercent: 0,
           priceDate: quote?.date ?? null,
         });
+      }
+      for (const anomaly of calc.inconsistencies ?? []) {
+        const instrumentId = anomaly.split(' pour ')[1]?.split(' le ')[0] ?? '';
+        const name = this.#instruments.get(instrumentId)?.name ?? 'un titre';
+        warnings.push(
+          `${account.name} : une vente de ${name} dépasse la quantité connue (historique incomplet de la source). ` +
+            'La position a été ramenée à zéro ; importez l’historique complet pour corriger.',
+        );
       }
       for (const mixed of calc.mixedCurrencyInstruments) {
         warnings.push(
@@ -977,7 +985,7 @@ export class PortfolioService {
       const quote = latestQuotes.get(activity.instrumentId);
       if (quote) lastPrices[activity.instrumentId] = quote.close;
     }
-    const calc = computePositions({ activities: domain, lastPrices, currency: account.currency });
+    const calc = computePositions({ activities: domain, lastPrices, currency: account.currency, onInconsistency: 'clamp' });
     const cost = round(sum(calc.positions.map((position) => position.costBasis)));
 
     // Wallet observé par adresse : la dernière position COMMUNIQUÉE PAR LA SOURCE
@@ -1111,7 +1119,7 @@ export class PortfolioService {
         lastPrices[activity.instrumentId] = latestQuotes.get(activity.instrumentId)!.close;
       }
     }
-    const calc = computePositions({ activities: domain, lastPrices });
+    const calc = computePositions({ activities: domain, lastPrices, onInconsistency: 'clamp' });
     const finalValue = round(sum(calc.positions.map((position) => position.marketValue)));
     const from = startOfPeriod(today, period, (rows[0] as ActivityRow).date);
     const windowedFlows = flows.external.filter((flow) => flow.date >= from);

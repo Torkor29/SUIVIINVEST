@@ -21,6 +21,14 @@ export interface PositionInput {
   readonly lastPrices?: Readonly<Record<string, number>>;
   /** Devise d'affichage ; les activités dans une autre devise doivent déjà être converties. */
   readonly currency?: CurrencyCode;
+  /**
+   * Vente supérieure à la position connue (historique incomplet d'une source) :
+   * « throw » (défaut, pour les tests et imports stricts) ou « clamp » — la vente
+   * est ramenée à la quantité détenue et l'anomalie est signalée dans
+   * `inconsistencies`. L'interface utilise « clamp » : des données imparfaites
+   * ne doivent jamais rendre une page inaccessible.
+   */
+  readonly onInconsistency?: 'throw' | 'clamp';
 }
 
 export interface PositionCalculation {
@@ -32,6 +40,8 @@ export interface PositionCalculation {
   readonly interest: number;
   /** Positions sans devise d'achat identique à celle du portefeuille (signalées, pas fusionnées). */
   readonly mixedCurrencyInstruments: readonly string[];
+  /** Anomalies corrigées en mode « clamp » (ventes au-delà de la position connue). */
+  readonly inconsistencies?: readonly string[];
 }
 
 interface MutableState {
@@ -66,6 +76,7 @@ export function computePositions(input: PositionInput): PositionCalculation {
   const currency = input.currency ?? 'EUR';
   const states = new Map<string, MutableState>();
   const mixed = new Set<string>();
+  const inconsistencies: string[] = [];
 
   // Ordre chronologique stable : indispensable pour un PRU reproductible.
   const ordered = [...input.activities].sort((a, b) => {
@@ -120,16 +131,22 @@ export function computePositions(input: PositionInput): PositionCalculation {
         break;
       }
       case 'SELL': {
+        let sold = qty;
+        let proceeds = amount;
         if (qty > state.quantity + 1e-9) {
-          throw new Error(
+          const message =
             `Vente de ${qty} > position ${state.quantity} pour ${key} le ${activity.date} ` +
-              '(données incohérentes : vérifier l\'ordre des imports et les splits)',
-          );
+            '(données incohérentes : vérifier l\'ordre des imports et les splits)';
+          if (input.onInconsistency !== 'clamp') throw new Error(message);
+          inconsistencies.push(message);
+          // Seule la part effectivement détenue est vendue ; le produit est réduit d'autant.
+          sold = state.quantity;
+          proceeds = qty > 0 ? amount * (sold / qty) : 0;
         }
         const unitCost = averageCost(state);
-        state.realizedPnl = round(state.realizedPnl + (amount - qty * unitCost));
-        state.costBasis = round(state.costBasis - qty * unitCost);
-        state.quantity = round(state.quantity - qty);
+        state.realizedPnl = round(state.realizedPnl + (proceeds - sold * unitCost));
+        state.costBasis = round(state.costBasis - sold * unitCost);
+        state.quantity = round(state.quantity - sold);
         if (state.quantity <= 1e-9) {
           state.quantity = 0;
           state.costBasis = 0;
@@ -212,6 +229,7 @@ export function computePositions(input: PositionInput): PositionCalculation {
     taxes: round(sum([...states.values()].map((s) => s.taxes))),
     interest: round(sum([...states.values()].map((s) => s.interest))),
     mixedCurrencyInstruments: [...mixed],
+    inconsistencies,
   };
 }
 
