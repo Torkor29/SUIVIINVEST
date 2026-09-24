@@ -115,7 +115,7 @@ export class MarketClient {
     const unavailable: string[] = [];
     let onvistaDown = false;
     const [onvista, gecko] = await Promise.all([
-      onvistaSearch(this.#fetch, q, BROWSER_UA).catch(() => {
+      this.#onvistaSearch(q).catch(() => {
         onvistaDown = true;
         return [] as OnvistaSearchResult[];
       }),
@@ -157,6 +157,29 @@ export class MarketClient {
     const outcome: SearchOutcome = { results, unavailable };
     if (unavailable.length === 0) this.#searchCache.set(cacheKey, { at: Date.now(), outcome });
     return outcome;
+  }
+
+  /**
+   * Onvista cherche le texte tel quel : « snp500 » ou « ishares sp 500 » ne
+   * trouvent rien. La recherche part donc aussi avec l'écriture usuelle
+   * (« S&P 500 »), et les deux listes sont fusionnées (écriture usuelle d'abord).
+   */
+  async #onvistaSearch(q: string): Promise<OnvistaSearchResult[]> {
+    const normalized = normalizeSecurityQuery(q);
+    const queries = normalized.toLowerCase() === q.toLowerCase() ? [q] : [normalized, q];
+    const settled = await Promise.allSettled(queries.map((query) => onvistaSearch(this.#fetch, query, BROWSER_UA)));
+    if (settled.every((outcome) => outcome.status === 'rejected')) throw new Error('Onvista injoignable');
+    const seen = new Set<string>();
+    const merged: OnvistaSearchResult[] = [];
+    for (const outcome of settled) {
+      if (outcome.status !== 'fulfilled') continue;
+      for (const item of outcome.value) {
+        if (seen.has(item.priceSymbol)) continue;
+        seen.add(item.priceSymbol);
+        merged.push(item);
+      }
+    }
+    return merged.slice(0, 12);
   }
 
   async #yahooSearch(q: string): Promise<AssetSearchResult[]> {
@@ -473,6 +496,22 @@ export function priceOnOrBefore(points: readonly PricePoint[], date: string): Pr
 
 export function kindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? 'Autre';
+}
+
+/**
+ * Écritures usuelles des indices : « snp500 », « sp 500 », « s and p 500 »
+ * -> « S&P 500 » ; « nasdaq100 » -> « Nasdaq 100 » ; « msciworld » -> « MSCI World ».
+ */
+export function normalizeSecurityQuery(query: string): string {
+  return query
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\b(?:s\s*(?:&|and|et|n)\s*p|snp|sp|s\s*p)\s*(500|100|400|600)\b/gi, 'S&P $1')
+    .replace(/\bnasdaq\s*-?\s*100\b/gi, 'Nasdaq 100')
+    .replace(/\bmsci\s*world\b/gi, 'MSCI World')
+    .replace(/\bmsci\s*(em|acwi)\b/gi, (_match, index: string) => `MSCI ${index.toUpperCase()}`)
+    .replace(/\bstoxx\s*(600|50)\b/gi, 'STOXX $1')
+    .replace(/\bcac\s*40\b/gi, 'CAC 40');
 }
 
 function toStooqSymbol(symbol: string): { symbol: string; currency: string } | null {

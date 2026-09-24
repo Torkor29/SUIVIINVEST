@@ -185,3 +185,21 @@ test('retirer un investissement : opérations saisies et plans supprimés, l’a
     await ctx.cleanup();
   }
 });
+
+test('écritures usuelles des indices : « snp500 », « ishares sp 500 »… deviennent « S&P 500 »', async () => {
+  const { normalizeSecurityQuery } = await import('../src/services/market-client.ts');
+  const cases: [string, string][] = [
+    ['snp500', 'S&P 500'],
+    ['SNP 500', 'S&P 500'],
+    ['sp500', 'S&P 500'],
+    ['s&p500', 'S&P 500'],
+    ['s and p 500', 'S&P 500'],
+    ['ishares snp 500', 'ishares S&P 500'],
+    ['nasdaq100', 'Nasdaq 100'],
+    ['msciworld', 'MSCI World'],
+    ['cac40', 'CAC 40'],
+    ['nvidia', 'nvidia'],
+    ['spotify', 'spotify'],
+  ];
+  for (const [query, expected] of cases) assert.equal(normalizeSecurityQuery(query), expected, query);
+});
