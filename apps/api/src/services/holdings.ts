@@ -21,6 +21,7 @@ import type { Db } from '../db/database.ts';
 import { AccountRepository, InstrumentRepository, type AccountRow, type InstrumentRow } from '../repositories/accounts.ts';
 import { ActivityRepository, toDomainActivity, ValuationRepository, type ActivityRow } from '../repositories/activities.ts';
 import { MarketRepository } from '../repositories/market.ts';
+import { currentTenantId } from '../db/tenants.ts';
 import {
   convertToEur,
   kindLabel,
@@ -59,6 +60,10 @@ const HISTORY_START: Readonly<Record<'onvista' | 'yahoo' | 'coingecko', string>>
   yahoo: '2000-01-01',
   coingecko: '2014-01-01',
 };
+/** Cours en direct : pas plus d'une interrogation des sources par minute et par espace. */
+const LIVE_MIN_INTERVAL_MS = 60_000;
+/** Relevés intrajournaliers conservés (jours). */
+const INTRADAY_RETENTION_DAYS = 4;
 /** Au-delà, une échéance sans cours est considérée comme « en attente ». */
 const MAX_SETTLEMENT_DAYS = 10;
 
@@ -122,6 +127,9 @@ export class HoldingsService {
   readonly #market: MarketRepository;
   readonly #client: MarketClient;
   readonly #now: () => Date;
+  /** Dernière interrogation « en direct » et interrogation en cours, par espace. */
+  readonly #liveAt = new Map<string, number>();
+  readonly #liveRunning = new Map<string, Promise<{ updated: number; at: string | null }>>();
 
   constructor(db: Db, options: HoldingsServiceOptions = {}) {
     this.#db = db;
@@ -261,6 +269,116 @@ export class HoldingsService {
       instrument.id,
     );
     return true;
+  }
+
+  /**
+   * Cours en direct des actifs détenus : le cours du jour prend la valeur de
+   * la dernière cotation (toutes les valeurs — portefeuille, patrimoine,
+   * crypto — deviennent « live ») et un relevé intrajournalier est gardé pour
+   * la courbe « 1 J ». Limité à une interrogation par minute et par espace.
+   */
+  async refreshLive(options: { minIntervalMs?: number; securities?: boolean } = {}): Promise<{ updated: number; at: string | null }> {
+    const key = currentTenantId() ?? 'default';
+    const running = this.#liveRunning.get(key);
+    if (running) return running;
+    const minInterval = options.minIntervalMs ?? LIVE_MIN_INTERVAL_MS;
+    const last = this.#liveAt.get(key) ?? 0;
+    if (Date.now() - last < minInterval) return { updated: 0, at: this.#lastLiveAt() };
+    this.#liveAt.set(key, Date.now());
+    const work = this.#refreshLive(options.securities !== false).finally(() => this.#liveRunning.delete(key));
+    this.#liveRunning.set(key, work);
+    return work;
+  }
+
+  async #refreshLive(securities: boolean): Promise<{ updated: number; at: string | null }> {
+    const held = [...this.#aggregate().values()].filter((entry) => entry.quantity > 1e-12).map((entry) => entry.instrumentId);
+    const instruments = held
+      .map((id) => this.#instruments.get(id))
+      .filter((row): row is InstrumentRow => !!row && !!row.price_symbol && ['onvista', 'yahoo', 'coingecko'].includes(row.price_source ?? ''))
+      .filter((row) => securities || row.price_source === 'coingecko');
+    if (instruments.length === 0) return { updated: 0, at: this.#lastLiveAt() };
+    const live = await this.#client.livePrices(
+      instruments.map((row) => ({ source: row.price_source as 'onvista' | 'yahoo' | 'coingecko', priceSymbol: row.price_symbol as string })),
+    );
+    const fetchedAt = this.#now().toISOString();
+    let updated = 0;
+    for (const row of instruments) {
+      const quote = live.get(`${row.price_source}|${row.price_symbol}`);
+      if (!quote) continue;
+      const date = quote.at.slice(0, 10);
+      let rate: number;
+      try {
+        rate = await this.#rateOn(quote.currency, date > this.#today() ? this.#today() : date);
+      } catch {
+        continue;
+      }
+      const price = round(quote.price * rate, 8);
+      this.#market.upsertQuotes([{ instrumentId: row.id, date, close: price, currency: 'EUR', provider: `${quote.provider}-live`, fetchedAt }]);
+      this.#db.run(
+        'INSERT OR REPLACE INTO intraday_prices (instrument_id, at, price, provider) VALUES (?, ?, ?, ?)',
+        row.id,
+        quote.at.slice(0, 16) + ':00.000Z',
+        price,
+        quote.provider,
+      );
+      updated++;
+    }
+    this.#db.run('DELETE FROM intraday_prices WHERE at < ?', `${shiftDay(this.#today(), -INTRADAY_RETENTION_DAYS)}T00:00:00.000Z`);
+    return { updated, at: updated > 0 ? fetchedAt : this.#lastLiveAt() };
+  }
+
+  #lastLiveAt(): string | null {
+    return this.#db.get<{ at: string | null }>(`SELECT MAX(fetched_at) AS at FROM quotes WHERE provider LIKE '%-live'`)?.at ?? null;
+  }
+
+  /**
+   * Valeur du portefeuille (ou d'une ligne) sur les dernières 24 heures, à
+   * partir des relevés en direct ; quantités actuelles. Premier point : la
+   * valeur au début de la fenêtre (dernier cours connu à ce moment-là).
+   * `null` tant qu'aucun relevé n'existe (la courbe quotidienne prend le relais).
+   */
+  intradaySeries(instrumentId?: string): HoldingValuePoint[] | null {
+    const now = this.#now();
+    const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+    const positions = [...this.#aggregate(instrumentId).values()].filter((entry) => entry.quantity > 1e-12);
+    if (positions.length === 0) return null;
+    const ids = positions.map((entry) => entry.instrumentId);
+    const placeholders = ids.map(() => '?').join(',');
+    const ticks = this.#db.all<{ instrument_id: string; at: string; price: number }>(
+      `SELECT instrument_id, at, price FROM intraday_prices WHERE instrument_id IN (${placeholders}) AND at >= ? ORDER BY at`,
+      ...ids,
+      since,
+    );
+    if (ticks.length === 0) return null;
+    // Point de départ : la clôture de la veille (comme un courtier), sinon le dernier cours connu.
+    const sinceDay = this.#today();
+    const price = new Map<string, number>();
+    for (const entry of positions) {
+      const before = this.#db.get<{ price: number }>(
+        'SELECT price FROM intraday_prices WHERE instrument_id = ? AND at < ? ORDER BY at DESC LIMIT 1',
+        entry.instrumentId,
+        since,
+      )?.price;
+      const close =
+        this.#db.get<{ close: number }>('SELECT close FROM quotes WHERE instrument_id = ? AND date < ? ORDER BY date DESC LIMIT 1', entry.instrumentId, sinceDay)
+          ?.close ?? this.#market.latestQuote(entry.instrumentId)?.close;
+      const fallback = entry.quantity > 0 ? entry.invested / entry.quantity : 0;
+      price.set(entry.instrumentId, before ?? close ?? fallback);
+    }
+    const invested = round(sum(positions.map((entry) => entry.invested)), 2);
+    const valueNow = (): number => round(sum(positions.map((entry) => entry.quantity * (price.get(entry.instrumentId) ?? 0))), 2);
+    const points: HoldingValuePoint[] = [{ date: since, value: valueNow(), invested }];
+    for (let index = 0; index < ticks.length; ) {
+      const at = (ticks[index] as { at: string }).at;
+      while (index < ticks.length && (ticks[index] as { at: string }).at === at) {
+        const tick = ticks[index] as { instrument_id: string; price: number };
+        price.set(tick.instrument_id, tick.price);
+        index++;
+      }
+      points.push({ date: at, value: valueNow(), invested });
+    }
+    points.push({ date: now.toISOString(), value: valueNow(), invested });
+    return points;
   }
 
   /** Cours saisi à la main (obligation, fonds non coté…), en euros ou dans `currency`. */
@@ -650,7 +768,8 @@ export class HoldingsService {
     const quotes = this.#quotes(instrumentId);
     const today = this.#today();
     const from = startOfPeriod(today, period, quotes[0]?.date ?? today);
-    const prices = quotes.filter((point) => point.date >= from).map((point) => ({ date: point.date, total: point.close }));
+    const intraday = period === '1D' ? this.#intradayPrices(instrumentId) : null;
+    const prices = intraday ?? quotes.filter((point) => point.date >= from).map((point) => ({ date: point.date, total: point.close }));
     const firstPrice = prices[0]?.total;
     const lastPrice = prices[prices.length - 1]?.total;
     const accountNames = new Map(this.#accounts.list().map((account) => [account.id, account]));
@@ -667,7 +786,7 @@ export class HoldingsService {
       operations,
       plans: this.listPlans(instrumentId),
       prices,
-      history: this.#valueSeries(from, today, instrumentId),
+      history: (period === '1D' ? this.intradaySeries(instrumentId) : null) ?? this.#valueSeries(from, today, instrumentId),
       period,
       priceChangePercent:
         firstPrice !== undefined && lastPrice !== undefined && firstPrice > 0
@@ -683,7 +802,7 @@ export class HoldingsService {
         WHERE c.type IN ('SECURITIES','CRYPTO','OTHER') AND a.instrument_id IS NOT NULL`,
     )?.date ?? today;
     const from = startOfPeriod(today, period, first);
-    const points = this.#valueSeries(from < first ? first : from, today);
+    const points = (period === '1D' ? this.intradaySeries() : null) ?? this.#valueSeries(from < first ? first : from, today);
     const start = points[0];
     const end = points[points.length - 1];
     // Variation = évolution de la valeur moins l'argent ajouté sur la période.
@@ -698,6 +817,27 @@ export class HoldingsService {
   }
 
   /* ================================================================ interne */
+
+  /** Cours d'un actif sur 24 heures (relevés en direct), précédé du cours de départ. */
+  #intradayPrices(instrumentId: string): { date: string; total: number }[] | null {
+    const now = this.#now();
+    const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+    const ticks = this.#db.all<{ at: string; price: number }>(
+      'SELECT at, price FROM intraday_prices WHERE instrument_id = ? AND at >= ? ORDER BY at',
+      instrumentId,
+      since,
+    );
+    if (ticks.length === 0) return null;
+    const start =
+      this.#db.get<{ price: number }>('SELECT price FROM intraday_prices WHERE instrument_id = ? AND at < ? ORDER BY at DESC LIMIT 1', instrumentId, since)
+        ?.price ??
+      this.#db.get<{ close: number }>('SELECT close FROM quotes WHERE instrument_id = ? AND date < ? ORDER BY date DESC LIMIT 1', instrumentId, this.#today())
+        ?.close ??
+      (ticks[0] as { price: number }).price;
+    const points = [{ date: since, total: start }, ...ticks.map((tick) => ({ date: tick.at, total: tick.price }))];
+    points.push({ date: now.toISOString(), total: (ticks[ticks.length - 1] as { price: number }).price });
+    return points;
+  }
 
   /** Positions par instrument (tous les comptes d'investissement), en euros. */
   #aggregate(onlyInstrument?: string): Map<string, Aggregate> {

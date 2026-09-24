@@ -161,6 +161,22 @@ export function parseIsoDate(iso: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * Date d'un point de courbe : jour (« 24 sept. 2026 ») ou, pour un relevé
+ * intrajournalier (« …T14:32:00Z »), l'heure locale (« 14:32 » ; en format
+ * long « 24 sept., 14:32 »).
+ */
+export function formatPointDate(iso: string | null | undefined, style: 'short' | 'long' = 'short'): string {
+  if (iso === null || iso === undefined || iso.length <= 10) return formatDate(iso, style);
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const today = date.toDateString() === new Date().toDateString();
+  // Axe : l'heure pour aujourd'hui, le jour pour la veille.
+  if (style === 'short') return today ? time : `${date.getDate()} ${MONTHS_FR[date.getMonth()] ?? ''}`;
+  return `${date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}, ${time}`;
+}
+
 /** Date -> « YYYY-MM-DD » (heure UTC). */
 export function toIsoDay(date: Date): string {
   const month = `${date.getUTCMonth() + 1}`.padStart(2, '0');

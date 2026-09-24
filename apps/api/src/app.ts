@@ -234,7 +234,9 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     }
     if (!path.startsWith('/api/')) return undefined;
 
-    const limit = apiLimiter.record(request.ip);
+    // Le relevé « en direct » (une fois par minute par page ouverte) est déjà
+    // limité côté serveur : il ne consomme pas le quota général.
+    const limit = path === '/api/holdings/live' ? { allowed: true } : apiLimiter.record(request.ip);
     if (!limit.allowed) {
       return sendError(reply, 429, 'RATE_LIMITED', 'Trop de requêtes, ralentissez.');
     }
@@ -306,7 +308,14 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     trustProxy: config.trustProxy,
     cookieSecure: config.cookieSecure,
   });
-  await registerWealthRoutes(app, { db: data, portfolio, crypto, realEstate, properties });
+  await registerWealthRoutes(app, {
+    db: data,
+    portfolio,
+    crypto,
+    realEstate,
+    properties,
+    intraday: () => holdings.intradaySeries(),
+  });
   // Saisie manuelle : indispensable pour les sources qui ne fournissent pas les
   // positions (Crédit Agricole) — l'utilisateur complète ce que l'API ne donne pas.
   await registerManualRoutes(app, { db: data });

@@ -4,7 +4,7 @@ import type { HoldingPositionDto, HoldingsHistoryResponse, HoldingsResponse, Per
 import { request } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import { useAction } from '../lib/useAction.ts';
-import { formatEur, formatPercent, formatRelative, formatSignedEur, toneOf } from '../lib/format.ts';
+import { formatEur, formatPercent, formatSignedEur, toneOf } from '../lib/format.ts';
 import { assetBadge, formatPrice, formatShares, HOLDING_PERIODS } from '../lib/holdings.ts';
 import { PERIOD_LABELS } from '../lib/period.ts';
 import { Card, Grid } from '../components/ui/Card.tsx';
@@ -14,6 +14,8 @@ import { StatTile } from '../components/ui/Stat.tsx';
 import { ActionFeedback } from '../components/ui/ActionFeedback.tsx';
 import { AllocationLegend, WarningsList } from '../components/ui/AllocationLegend.tsx';
 import { PeriodSelector } from '../components/ui/PeriodSelector.tsx';
+import { LiveBadge } from '../components/ui/LiveBadge.tsx';
+import { useLivePrices } from '../lib/useLivePrices.ts';
 import { DonutChart } from '../components/charts/DonutChart.tsx';
 import { LineAreaChart } from '../components/charts/LineAreaChart.tsx';
 import { Sparkline } from '../components/charts/Sparkline.tsx';
@@ -34,6 +36,10 @@ export function InvestmentsPage() {
     [period],
   );
   const refresh = useAction();
+  const live = useLivePrices(() => {
+    state.reload();
+    history.reload();
+  });
 
   const reloadAll = (): void => {
     state.reload();
@@ -133,7 +139,7 @@ export function InvestmentsPage() {
                   <div className="chart-panel-foot">
                     <PeriodSelector value={period} onChange={setPeriod} keys={HOLDING_PERIODS} compact />
                     <span className="muted small">
-                      {data.lastPriceUpdate ? `Cours mis à jour ${formatRelative(data.lastPriceUpdate)}` : 'Cours pas encore chargés'}
+                      <LiveBadge at={live.at ?? data.lastPriceUpdate} />
                     </span>
                   </div>
                 </section>

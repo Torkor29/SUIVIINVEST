@@ -140,7 +140,12 @@ export class PortfolioService {
 
   /* ---------------------------------------------------------------- patrimoine */
 
-  netWorth(period: PeriodKey = '1Y'): NetWorthResponse {
+  /**
+   * @param intraday Valeur des investissements relevée en direct sur 24 h
+   *   (période « 1 J ») : la courbe suit alors ces relevés, le reste du
+   *   patrimoine (banque, immobilier, dettes) étant constant sur la journée.
+   */
+  netWorth(period: PeriodKey = '1Y', intraday: readonly { date: string; value: number }[] | null = null): NetWorthResponse {
     const snapshot = this.#snapshot();
     const reconstructed = this.#series(snapshot.today);
 
@@ -158,14 +163,18 @@ export class PortfolioService {
 
     const firstDate = points[0]?.date ?? snapshot.today;
     const windowStart = startOfPeriod(snapshot.today, period, firstDate);
-    const series: SeriesPoint[] = densify(points, windowStart, snapshot.today).map((point) => ({
-      date: point.date,
-      total: point.total,
-    }));
+    const lastIntraday = intraday && intraday.length > 1 ? (intraday[intraday.length - 1] as { value: number }).value : null;
+    const series: SeriesPoint[] =
+      lastIntraday !== null && intraday
+        ? intraday.map((point) => ({ date: point.date, total: round(snapshot.total + point.value - lastIntraday) }))
+        : densify(points, windowStart, snapshot.today).map((point) => ({
+            date: point.date,
+            total: point.total,
+          }));
 
     // Si l'historique est trop court pour la période demandée, on le dit.
     const warnings = [...snapshot.warnings];
-    if (windowStart < firstDate) {
+    if (windowStart < firstDate && lastIntraday === null) {
       warnings.push(
         `Votre historique commence le ${frenchDate(firstDate)} : la courbe ne peut pas remonter plus loin.`,
       );

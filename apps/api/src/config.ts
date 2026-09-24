@@ -32,6 +32,8 @@ export interface AppConfig {
   readonly snapshotCron: string;
   /** Rafraîchissement des cours suivis et exécution des investissements programmés. */
   readonly pricesCron: string;
+  /** Cours en direct des actifs détenus (« off » pour désactiver). */
+  readonly liveCron: string;
   readonly backupRetentionDays: number;
   readonly marketDataProviders: readonly string[];
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -84,6 +86,7 @@ const DEFAULTS = {
   // Cours du portefeuille saisi à la main + investissements programmés :
   // matin, midi, après la clôture européenne et après la clôture américaine.
   pricesCron: '5 8,13,18,23 * * *',
+  liveCron: '*/5 * * * *',
   backupRetentionDays: 30,
   logLevel: 'info' as const,
 };
@@ -178,6 +181,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     backupCron: env.SUIVIINVEST_BACKUP_CRON ?? DEFAULTS.backupCron,
     snapshotCron: env.SUIVIINVEST_SNAPSHOT_CRON ?? DEFAULTS.snapshotCron,
     pricesCron: env.SUIVIINVEST_PRICES_CRON ?? DEFAULTS.pricesCron,
+    liveCron: env.SUIVIINVEST_LIVE_CRON ?? DEFAULTS.liveCron,
     backupRetentionDays: requireInt(env.SUIVIINVEST_BACKUP_RETENTION_DAYS, DEFAULTS.backupRetentionDays),
     marketDataProviders: parseList(env.SUIVIINVEST_MARKET_PROVIDERS, ['onvista', 'yahoo', 'coingecko', 'ecb']),
     logLevel: (env.SUIVIINVEST_LOG_LEVEL as AppConfig['logLevel']) ?? DEFAULTS.logLevel,

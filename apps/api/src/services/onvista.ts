@@ -199,6 +199,30 @@ export async function onvistaHistory(
   };
 }
 
+/** Dernier cours (séance en cours, place en euros de préférence) et son heure. */
+export async function onvistaLive(
+  fetchImpl: typeof fetch,
+  priceSymbol: string,
+  userAgent: string,
+): Promise<{ price: number; currency: string; at: string } | null> {
+  const match = /^(STOCK|FUND):(\d+)$/.exec(priceSymbol);
+  if (!match) return null;
+  const snapshot = await getJson<{ quoteList?: { list?: RawQuote[] } }>(
+    fetchImpl,
+    `${API}/instruments/${match[1]}/${match[2]}/snapshot`,
+    userAgent,
+  );
+  const quote = pickQuote(snapshot.quoteList?.list ?? []);
+  if (!quote || typeof quote.last !== 'number' || !(quote.last > 0) || !quote.datetimeLast) return null;
+  const raw = quote.isoCurrency ?? 'EUR';
+  const pence = raw === 'GBp' || raw === 'GBX';
+  return {
+    price: quote.last * (pence ? 0.01 : 1),
+    currency: pence ? 'GBP' : raw.toUpperCase(),
+    at: new Date(quote.datetimeLast).toISOString(),
+  };
+}
+
 function pickQuote(list: readonly RawQuote[]): RawQuote | null {
   const usable = list.filter((quote) => quote.market?.idNotation);
   for (const code of PREFERRED_MARKETS) {

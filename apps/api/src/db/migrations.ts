@@ -494,6 +494,21 @@ ALTER TABLE users ADD COLUMN tenant_id TEXT;
 CREATE INDEX idx_users_tenant ON users(tenant_id);
 `;
 
+/**
+ * v11 — cours en direct : relevés intrajournaliers (en euros) des actifs suivis,
+ * pour la courbe « 1 J ». Conservés quelques jours seulement.
+ */
+const INTRADAY_V11 = `
+CREATE TABLE intraday_prices (
+  instrument_id TEXT NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+  at            TEXT NOT NULL,
+  price         REAL NOT NULL,
+  provider      TEXT NOT NULL,
+  PRIMARY KEY (instrument_id, at)
+);
+CREATE INDEX idx_intraday_at ON intraday_prices(at);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
@@ -505,4 +520,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 8, name: 'manual_portfolio', statements: [MANUAL_PORTFOLIO_V8] },
   { version: 9, name: 'google_sign_in', statements: [GOOGLE_SIGN_IN_V9] },
   { version: 10, name: 'tenants', statements: [TENANTS_V10] },
+  { version: 11, name: 'intraday_prices', statements: [INTRADAY_V11] },
 ];

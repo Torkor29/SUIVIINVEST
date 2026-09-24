@@ -13,6 +13,7 @@ import { SkeletonChart, SkeletonTiles } from '../components/ui/Skeleton.tsx';
 import { Badge, KeyValue } from '../components/ui/Stat.tsx';
 import { ActionFeedback } from '../components/ui/ActionFeedback.tsx';
 import { PeriodSelector } from '../components/ui/PeriodSelector.tsx';
+import { useLivePrices } from '../lib/useLivePrices.ts';
 import { Sheet } from '../components/ui/Sheet.tsx';
 import { IconArrowLeft } from '../components/ui/Icons.tsx';
 import { LineAreaChart } from '../components/charts/LineAreaChart.tsx';
@@ -32,6 +33,7 @@ export function HoldingDetailPage() {
     [id, period],
   );
   const refresh = useAction();
+  useLivePrices(state.reload);
 
   return (
     <>

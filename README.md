@@ -73,6 +73,12 @@ l'heure du serveur, UTC sous Docker ; réglable : `SUIVIINVEST_PRICES_CRON`), ai
 une mise à jour. **Obligations et actifs non cotés** : « L'ajouter à la main », puis saisissez
 le cours quand il change.
 
+**Cours en direct** : toutes les 5 minutes (titres de 7 h à 23 h en semaine, heure de Paris ;
+cryptos à toute heure ; réglable : `SUIVIINVEST_LIVE_CRON`, `off` pour couper), et chaque
+minute tant que l'application est ouverte, le dernier cours de chaque actif détenu est relevé.
+Portefeuille, accueil et crypto affichent alors la valeur en direct, et la période **1 J**
+trace la journée depuis la clôture de la veille à partir de ces relevés (gardés 4 jours).
+
 Ces investissements vivent dans deux comptes créés automatiquement, « Mes investissements » et
 « Mes cryptos » : ils comptent dans le patrimoine, le tableau de bord et les analyses. Les
 connexions (banques, wallets, courtiers) restent disponibles en complément, et leurs positions

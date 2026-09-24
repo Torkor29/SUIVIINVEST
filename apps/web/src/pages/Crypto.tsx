@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { CryptoResponse } from '@suiviinvest/api-contract';
 import { request } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
+import { useLivePrices } from '../lib/useLivePrices.ts';
 import { formatDate, formatEur, formatNumber, formatQuantity, shortenAddress } from '../lib/format.ts';
 import { PageHeader, Card, Grid } from '../components/ui/Card.tsx';
 import { AsyncView, EmptyState } from '../components/ui/AsyncView.tsx';
@@ -22,6 +23,7 @@ const MANUAL_CRYPTO_ADDRESS = 'manual-crypto';
 export function CryptoPage() {
   const state = useAsync<CryptoResponse>((signal) => request<CryptoResponse>('/api/crypto', { signal }), []);
   const [adding, setAdding] = useState(false);
+  useLivePrices(state.reload);
   const actions = (
     <span className="card-actions-row">
       <button type="button" className="btn btn-primary" onClick={() => setAdding(true)} data-testid="add-crypto-open">
@@ -42,7 +44,7 @@ export function CryptoPage() {
       />
       {adding && <AddInvestmentSheet scope="crypto" onClose={() => setAdding(false)} onAdded={state.reload} />}
       <AsyncView
-        loading={state.loading}
+        loading={state.loading && state.data === null}
         error={state.error}
         data={state.data}
         onRetry={state.reload}

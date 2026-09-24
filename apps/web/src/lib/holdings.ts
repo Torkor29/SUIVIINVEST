@@ -20,7 +20,7 @@ export const FREQUENCY_LABELS: Readonly<Record<DcaPlanDto['frequency'], string>>
 };
 
 /** Périodes proposées sur les courbes de cours et de portefeuille. */
-export const HOLDING_PERIODS: readonly PeriodKey[] = ['1W', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'];
+export const HOLDING_PERIODS: readonly PeriodKey[] = ['1D', '1W', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'];
 
 export const PLAN_CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF'] as const;
 

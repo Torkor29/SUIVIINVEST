@@ -166,6 +166,7 @@ export function mockRequest(url: string, method: string, body: unknown): unknown
   if (path === '/api/holdings/history') return holdingsHistory(periodFrom(params));
   if (path === '/api/holdings/search') return assetSearch(params.get('q') ?? '');
   if (path === '/api/holdings/refresh') return { instruments: 12, quotes: 12, errors: [], executions: 0 };
+  if (path === '/api/holdings/live') return { updated: 0, at: new Date().toISOString() };
   if (path === '/api/holdings/plans') return holdingsOverview().plans;
   if (path === '/api/holdings/assets' && method === 'POST') {
     return { asset: demoAsset(bodyField<string>(body, 'symbol', 'NVDA')), quotes: 1250, warning: null };

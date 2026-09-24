@@ -1,7 +1,7 @@
 import { useId, useMemo, useState, type MouseEvent } from 'react';
 import type { SeriesPoint } from '@suiviinvest/api-contract';
 import { buildPoints, downsample, linePath, areaPath, niceTicks, nearestIndex } from '../../lib/chartMath.ts';
-import { formatCompactEur, formatDate, formatEur } from '../../lib/format.ts';
+import { formatCompactEur, formatEur, formatPointDate } from '../../lib/format.ts';
 
 export interface LineAreaChartProps {
   readonly points: readonly SeriesPoint[];
@@ -134,15 +134,15 @@ export function LineAreaChart({
       <div className="chart-xaxis">
         {sampled.length > 1 && (
           <>
-            <span>{formatDate(sampled[0]?.date ?? null)}</span>
-            <span>{formatDate(sampled[Math.floor(sampled.length / 2)]?.date ?? null)}</span>
-            <span>{formatDate(sampled[sampled.length - 1]?.date ?? null)}</span>
+            <span>{formatPointDate(sampled[0]?.date ?? null)}</span>
+            <span>{formatPointDate(sampled[Math.floor(sampled.length / 2)]?.date ?? null)}</span>
+            <span>{formatPointDate(sampled[sampled.length - 1]?.date ?? null)}</span>
           </>
         )}
       </div>
       {activePoint !== undefined && (
         <div className="chart-tooltip">
-          <span className="chart-tooltip-date">{formatDate(activePoint.date, 'long')}</span>
+          <span className="chart-tooltip-date">{formatPointDate(activePoint.date, 'long')}</span>
           {activeSecondary !== undefined ? (
             <>
               <span className="chart-tooltip-row">

@@ -194,6 +194,15 @@ export async function registerHoldingsRoutes(app: FastifyInstance, deps: Holding
     }
   });
 
+  // Cours en direct : l'interface l'appelle chaque minute tant qu'elle est ouverte.
+  app.get('/api/holdings/live', async (_request, reply) => {
+    try {
+      return reply.send(await holdings.refreshLive());
+    } catch (error) {
+      return fail(reply, error);
+    }
+  });
+
   app.post('/api/holdings/refresh', async (_request, reply) => {
     const result = await holdings.refreshAll();
     return reply.send(result);

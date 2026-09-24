@@ -43,6 +43,8 @@ export interface WealthRoutesDeps {
   readonly crypto: CryptoService;
   readonly realEstate: RealEstateService;
   readonly properties: PropertyRepository;
+  /** Courbe « 1 J » : valeur des investissements relevée en direct. */
+  readonly intraday?: () => readonly { date: string; value: number }[] | null;
 }
 
 const periodSchema = z.enum(['1D', '1W', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']).default('1Y');
@@ -143,7 +145,9 @@ export async function registerWealthRoutes(app: FastifyInstance, deps: WealthRou
 
   app.get('/api/networth', async (request, reply) => {
     const query = z.object({ period: periodSchema.optional() }).parse(request.query);
-    return reply.send(deps.portfolio.netWorth((query.period ?? '1Y') as PeriodKey));
+    const period = (query.period ?? '1Y') as PeriodKey;
+    const intraday = period === '1D' ? (deps.intraday?.() ?? null) : null;
+    return reply.send(deps.portfolio.netWorth(period, intraday));
   });
 
   app.get('/api/accounts', async (_request, reply) => reply.send(deps.portfolio.accounts()));

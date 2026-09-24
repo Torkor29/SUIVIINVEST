@@ -1,5 +1,5 @@
 import type { HoldingKind } from '@suiviinvest/api-contract';
-import { onvistaHistory, onvistaResolve, onvistaSearch, type OnvistaSearchResult } from './onvista.ts';
+import { onvistaHistory, onvistaLive, onvistaResolve, onvistaSearch, type OnvistaSearchResult } from './onvista.ts';
 
 /**
  * Cours de marché pour le portefeuille saisi à la main : recherche d'un actif,
@@ -53,6 +53,14 @@ export interface PriceHistory {
   readonly provider: string;
   /** Nom officiel quand la source le donne. */
   readonly name?: string | null;
+}
+
+/** Cours en direct d'un actif : prix, devise, heure de cotation (ISO). */
+export interface LivePrice {
+  readonly price: number;
+  readonly currency: string;
+  readonly at: string;
+  readonly provider: string;
 }
 
 export interface MarketClientOptions {
@@ -253,6 +261,52 @@ export class MarketClient {
     const yahoo = await this.#yahooHistory(priceSymbol, from).catch(() => null);
     if (yahoo && yahoo.points.length > 0) return yahoo;
     return this.#stooqHistory(priceSymbol, from).catch(() => null);
+  }
+
+  /**
+   * Cours en direct, clé « source|symbole ». Cryptos en une seule requête
+   * CoinGecko ; titres un par un (Onvista, Yahoo en secours pour les anciens
+   * actifs). Une source muette laisse simplement l'actif de côté.
+   */
+  async livePrices(items: readonly { source: PriceSource; priceSymbol: string }[]): Promise<Map<string, LivePrice>> {
+    const result = new Map<string, LivePrice>();
+    const coins = [...new Set(items.filter((item) => item.source === 'coingecko').map((item) => item.priceSymbol))];
+    if (coins.length > 0) {
+      try {
+        const response = await this.#get(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${coins.map(encodeURIComponent).join(',')}&vs_currencies=eur&include_last_updated_at=true`,
+        );
+        const payload = (await response.json()) as Record<string, { eur?: number; last_updated_at?: number }>;
+        for (const coin of coins) {
+          const entry = payload[coin];
+          if (typeof entry?.eur === 'number' && entry.eur > 0) {
+            const at = new Date((entry.last_updated_at ?? this.#now().getTime() / 1000) * 1000).toISOString();
+            result.set(`coingecko|${coin}`, { price: entry.eur, currency: 'EUR', at, provider: 'coingecko' });
+          }
+        }
+      } catch {
+        // CoinGecko limité : les cryptos gardent leur dernier cours.
+      }
+    }
+    for (const item of items) {
+      if (item.source === 'onvista') {
+        const live = await onvistaLive(this.#fetch, item.priceSymbol, BROWSER_UA).catch(() => null);
+        if (live) result.set(`onvista|${item.priceSymbol}`, { ...live, provider: 'onvista' });
+      } else if (item.source === 'yahoo') {
+        const history = await this.#yahooHistory(item.priceSymbol, shiftDay(this.#today(), -5)).catch(() => null);
+        const last = history?.points.at(-1);
+        if (history && last) {
+          result.set(`yahoo|${item.priceSymbol}`, {
+            price: last.close,
+            currency: history.currency,
+            // Yahoo ne donne ici que le jour : l'heure courante pour aujourd'hui, la clôture sinon.
+            at: last.date === this.#today() ? this.#now().toISOString() : `${last.date}T20:00:00.000Z`,
+            provider: 'yahoo',
+          });
+        }
+      }
+    }
+    return result;
   }
 
   /**

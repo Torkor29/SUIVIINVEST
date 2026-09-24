@@ -59,6 +59,7 @@ async function main(): Promise<void> {
       recordDailySnapshot: () => built.portfolio.recordDailySnapshot(),
     },
     pricesCron: config.pricesCron,
+    liveCron: config.liveCron,
     holdings: built.holdings,
   });
   scheduler.start();

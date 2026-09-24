@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { AllocationSlice, NetWorthResponse, PeriodKey } from '@suiviinvest/api-contract';
 import { request } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
+import { useLivePrices } from '../lib/useLivePrices.ts';
 import { formatDate, formatEur, formatPercent, toneOf } from '../lib/format.ts';
 import { seriesVariation } from '../lib/period.ts';
 import { Card, Grid } from '../components/ui/Card.tsx';
@@ -33,6 +34,7 @@ export function DashboardPage() {
     (signal) => request<NetWorthResponse>('/api/networth', { query: { period }, signal }),
     [period],
   );
+  useLivePrices(state.reload);
   const provenance = describeHistorySource(state.data?.historySource, state.data?.recordedSince);
 
   return (

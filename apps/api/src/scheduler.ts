@@ -23,7 +23,10 @@ export interface SchedulerOptions {
   readonly pricesCron?: string;
   readonly holdings?: {
     refreshAll(): Promise<{ instruments: number; quotes: number; errors: string[]; executions: number }>;
+    refreshLive?(options: { minIntervalMs?: number; securities?: boolean }): Promise<{ updated: number; at: string | null }>;
   };
+  /** Cours en direct (toutes les 5 minutes par défaut) ; « off » pour désactiver. */
+  readonly liveCron?: string;
   readonly logger: Logger;
   readonly sync: SyncService;
   readonly backup: Pick<BackupService, 'create'>;
@@ -48,6 +51,7 @@ export class Scheduler implements SchedulerState {
   #backupJob: Cron | null = null;
   #snapshotJob: Cron | null = null;
   #pricesJob: Cron | null = null;
+  #liveJob: Cron | null = null;
   #lastRunAt: string | null = null;
 
   constructor(options: SchedulerOptions) {
@@ -128,6 +132,11 @@ export class Scheduler implements SchedulerState {
       // Au démarrage : cours à jour et échéances manquées pendant l'arrêt rattrapées.
       setTimeout(() => void this.refreshPrices(), 5_000).unref();
     }
+    if (holdings?.refreshLive && this.#options.liveCron && this.#options.liveCron !== 'off') {
+      this.#liveJob = new Cron(this.#options.liveCron, { protect: true }, async () => {
+        await this.refreshLive();
+      });
+    }
 
     logger.info('Ordonnanceur démarré', {
       syncCron: this.#options.syncCron,
@@ -136,6 +145,26 @@ export class Scheduler implements SchedulerState {
       nextBackup: this.#backupJob.nextRun()?.toISOString() ?? null,
       nextSnapshot: this.#snapshotJob.nextRun()?.toISOString() ?? null,
     });
+  }
+
+  /**
+   * Cours en direct de chaque espace. Titres pendant les heures de bourse
+   * européennes élargies (7 h – 23 h, heure de Paris), cryptos à toute heure.
+   * Ne lève jamais.
+   */
+  async refreshLive(now = new Date()): Promise<void> {
+    const refresh = this.#options.holdings?.refreshLive;
+    if (!refresh) return;
+    const parisHour = Number(new Intl.DateTimeFormat('fr-FR', { hour: 'numeric', hour12: false, timeZone: 'Europe/Paris' }).format(now));
+    const weekday = new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: 'Europe/Paris' }).format(now);
+    const securities = parisHour >= 7 && parisHour < 23 && weekday !== 'Sat' && weekday !== 'Sun';
+    try {
+      await this.#everywhere(async () => {
+        await refresh.call(this.#options.holdings, { minIntervalMs: 0, securities });
+      });
+    } catch (error) {
+      this.#options.logger.warn('Cours en direct indisponibles', { error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   /** Cours suivis et investissements programmés ; ne lève jamais. */
@@ -186,6 +215,8 @@ export class Scheduler implements SchedulerState {
     this.#snapshotJob?.stop();
     this.#pricesJob?.stop();
     this.#pricesJob = null;
+    this.#liveJob?.stop();
+    this.#liveJob = null;
     this.#syncJob = null;
     this.#backupJob = null;
     this.#snapshotJob = null;
