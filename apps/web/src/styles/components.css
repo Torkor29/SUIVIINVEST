@@ -1622,6 +1622,7 @@ a.list-row:hover {
   position: fixed;
   z-index: 60;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 24px;
   background: rgba(0, 0, 0, 0.42);
@@ -1633,7 +1634,10 @@ a.list-row:hover {
   display: flex;
   flex-direction: column;
   width: min(620px, 100%);
+  min-width: 0;
+  max-width: 100%;
   max-height: min(88vh, 860px);
+  max-height: min(88dvh, 860px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--elevated);
@@ -1647,6 +1651,10 @@ a.list-row:hover {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 20px 8px 24px;
+}
+
+.sheet-heading {
+  min-width: 0;
 }
 
 .sheet-title {
@@ -1663,8 +1671,24 @@ a.list-row:hover {
 }
 
 .sheet-body {
+  min-width: 0;
   padding: 8px 24px 24px;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Dans une fenêtre, les textes longs passent à la ligne au lieu de déborder. */
+.sheet-body .btn-link,
+.sheet-body .search-result {
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.sheet-body .input {
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 @keyframes sheet-fade {
@@ -1682,12 +1706,17 @@ a.list-row:hover {
   .sheet {
     width: 100%;
     max-height: 92vh;
+    max-height: 92dvh;
     border-radius: 22px 22px 0 0;
     animation: sheet-up 0.2s ease;
   }
 
+  .sheet-head {
+    padding: 18px 14px 6px 18px;
+  }
+
   .sheet-body {
-    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    padding: 8px 18px calc(24px + env(safe-area-inset-bottom));
   }
 
   .hero-actions {
