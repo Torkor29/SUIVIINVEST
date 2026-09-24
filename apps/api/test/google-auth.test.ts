@@ -131,15 +131,42 @@ test('premier lancement : « Continuer avec Google » crée le propriétaire, pu
     assert.equal(again.location, '/');
     assert.ok(again.sessionCookie);
 
-    // Un autre compte Google n'entre pas : le patrimoine est privé.
-    state.identity = { sub: 'g-inconnu', email: 'inconnu@exemple.fr' };
-    const stranger = await googleFlow(ctx, state);
-    assert.equal(stranger.location, '/?google=not_invited');
-    assert.equal(stranger.sessionCookie, null);
-
-    // Le propriétaire (sans mot de passe) définit son premier mot de passe sans « mot de passe actuel ».
     const csrf = ((await ctx.app.app.inject({ method: 'GET', url: '/api/auth/session', headers: { cookie: again.sessionCookie as string } })).json() as { csrfToken: string }).csrfToken;
     const owner = { cookie: again.sessionCookie as string, csrfToken: csrf };
+    // Le propriétaire a des données (une obligation à cours manuel).
+    const asset = await authRequest(ctx, owner, {
+      method: 'POST',
+      url: '/api/holdings/assets',
+      payload: { source: 'manual', name: 'OAT 2034', kind: 'BOND', price: 100, priceDate: '2026-01-02' },
+    });
+    const bondId = (asset.json() as { asset: { instrumentId: string } }).asset.instrumentId;
+    await authRequest(ctx, owner, { method: 'POST', url: '/api/holdings/operations', payload: { instrumentId: bondId, type: 'BUY', date: '2026-01-02', quantity: 3 } });
+
+    // Un autre compte Google s'inscrit : il reçoit son PROPRE espace, vide.
+    state.identity = { sub: 'g-inconnu', email: 'inconnu@exemple.fr', name: 'Inconnu' };
+    const stranger = await googleFlow(ctx, state);
+    assert.equal(stranger.location, '/?google=welcome');
+    assert.ok(stranger.sessionCookie);
+    const strangerHoldings = (await ctx.app.app.inject({ method: 'GET', url: '/api/holdings', headers: { cookie: stranger.sessionCookie as string } })).json() as { positions: unknown[] };
+    assert.equal(strangerHoldings.positions.length, 0, 'aucune donnée du propriétaire visible');
+    const strangerAccounts = (await ctx.app.app.inject({ method: 'GET', url: '/api/auth/accounts', headers: { cookie: stranger.sessionCookie as string } })).json() as { accounts: { id: string }[] };
+    assert.equal(strangerAccounts.accounts.length, 1, 'ne voit que son propre compte');
+    const ownerHoldings = (await authRequest(ctx, owner, { method: 'GET', url: '/api/holdings' })).json() as { positions: unknown[] };
+    assert.equal(ownerHoldings.positions.length, 1);
+    const strangerSession = (await ctx.app.app.inject({ method: 'GET', url: '/api/auth/session', headers: { cookie: stranger.sessionCookie as string } })).json() as { admin: boolean; role: string };
+    assert.deepEqual([strangerSession.admin, strangerSession.role], [false, 'OWNER']);
+    // Il ne peut pas régler Google pour l'installation.
+    const strangerCsrf = ((await ctx.app.app.inject({ method: 'GET', url: '/api/auth/session', headers: { cookie: stranger.sessionCookie as string } })).json() as { csrfToken: string }).csrfToken;
+    const denied = await authRequest(ctx, { cookie: stranger.sessionCookie as string, csrfToken: strangerCsrf }, { method: 'DELETE', url: '/api/auth/google/config' });
+    assert.equal(denied.statusCode, 403);
+
+    // Inscriptions fermées par l'administrateur : un nouveau compte Google est refusé.
+    const closed = await authRequest(ctx, owner, { method: 'PUT', url: '/api/auth/registration', payload: { open: false } });
+    assert.equal(closed.statusCode, 200, closed.body);
+    state.identity = { sub: 'g-autre', email: 'autre@exemple.fr' };
+    const refused = await googleFlow(ctx, state);
+    assert.equal(refused.location, '/?google=not_invited');
+    assert.equal(refused.sessionCookie, null);
     const unlinkRefused = await authRequest(ctx, owner, { method: 'DELETE', url: '/api/auth/google/link' });
     assert.equal(unlinkRefused.statusCode, 409, 'sans mot de passe, délier Google verrouillerait le compte');
     const password = await authRequest(ctx, owner, {

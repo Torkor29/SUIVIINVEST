@@ -18,7 +18,7 @@ import { MAX_EMAIL_LENGTH } from '../security/pii.ts';
 import { passwordResetEmail, type Mailer } from '../services/mailer.ts';
 import { LOGIN_RATE_LIMIT, RateLimiter } from '../security/rate-limit.ts';
 import { MIN_PASSWORD_LENGTH } from '../security/password.ts';
-import type { AuditRepository } from '../repositories/connections.ts';
+import type { AuditRepository, SettingsRepository } from '../repositories/connections.ts';
 
 /**
  * Routes d'authentification et de comptes.
@@ -37,12 +37,17 @@ import type { AuditRepository } from '../repositories/connections.ts';
 export interface AuthRoutesDeps {
   readonly auth: AuthService;
   readonly audit: AuditRepository;
+  /** Réglages de l'installation (base principale) : ouverture des inscriptions. */
+  readonly settings?: SettingsRepository;
   readonly loginLimiter?: RateLimiter;
   readonly mailer?: Mailer;
   /** Adresse publique : obligatoire pour envoyer un lien (jamais déduite de l'en-tête Host). */
   readonly publicUrl?: string | null;
   readonly logger?: Logger;
 }
+
+/** Réglage (base principale) : « closed » ferme l'inscription libre. */
+export const REGISTRATION_SETTING = 'registration';
 
 const passwordSchema = z.string().min(MIN_PASSWORD_LENGTH).max(200);
 const usernameSchema = z.string().min(3).max(32);
@@ -114,6 +119,8 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
   const limiter = deps.loginLimiter ?? new RateLimiter(LOGIN_RATE_LIMIT);
   const publicUrl = deps.publicUrl ?? null;
   const emailResetAvailable = (deps.mailer?.configured ?? false) && publicUrl !== null;
+  /** Inscription libre : ouverte par défaut, l'administrateur peut la fermer. */
+  const registrationOpen = (): boolean => (deps.settings?.get(REGISTRATION_SETTING) ?? 'open') !== 'closed';
 
   /**
    * Contrôle d'accès des routes `/api/auth/*` (exclues du crochet global).
@@ -122,7 +129,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
   function requireSession(
     request: FastifyRequest,
     reply: FastifyReply,
-    options: { owner?: boolean } = {},
+    options: { owner?: boolean; admin?: boolean } = {},
   ): AuthenticatedSession | null {
     const session = deps.auth.authenticate(request.cookies[SESSION_COOKIE] ?? null);
     if (!session) {
@@ -137,6 +144,10 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
         return null;
       }
     }
+    if (options.admin && !session.admin) {
+      sendError(reply, 403, 'FORBIDDEN', 'Réservé à l’administrateur de l’installation.');
+      return null;
+    }
     if (options.owner && session.role !== 'OWNER') {
       sendError(reply, 403, 'FORBIDDEN', 'Seul le propriétaire peut gérer les comptes.');
       return null;
@@ -150,6 +161,8 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
     const profile = session?.userId === undefined ? null : deps.auth.getProfile(session.userId);
     return {
       authenticated: session !== null,
+      admin: session?.userId === undefined ? false : deps.auth.isAdmin(session.userId),
+      registrationOpen: registrationOpen(),
       csrfToken: session?.csrfToken ?? null,
       needsSetup: deps.auth.needsSetup(),
       username: session?.username ?? null,
@@ -223,6 +236,72 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
         error instanceof Error ? error.message : 'Configuration impossible.',
       );
     }
+  });
+
+  /* ------------------------------------------------------------ inscription */
+
+  /** Inscription libre : un espace personnel, vide, invisible des autres. */
+  app.post('/api/auth/register', async (request, reply) => {
+    const key = clientKey(request);
+    const limit = limiter.check(key);
+    if (!limit.allowed) return sendError(reply, 429, 'RATE_LIMITED', 'Trop de tentatives, réessayez plus tard.');
+    if (deps.auth.needsSetup()) {
+      return sendError(reply, 409, 'CONFLICT', 'Aucun compte encore : créez d’abord le compte propriétaire.');
+    }
+    if (!registrationOpen()) {
+      return sendError(reply, 403, 'FORBIDDEN', 'Les inscriptions sont fermées sur ce serveur.');
+    }
+    const parsed = z
+      .object({
+        email: emailSchema.min(3),
+        password: passwordSchema,
+        displayName: z.string().max(80).optional().nullable(),
+        username: usernameSchema.optional().nullable(),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      limiter.record(key, false);
+      return sendError(
+        reply,
+        400,
+        'INVALID_REQUEST',
+        `Inscription refusée : adresse e-mail et mot de passe de ${MIN_PASSWORD_LENGTH} caractères minimum.`,
+      );
+    }
+    try {
+      const result = await deps.auth.register(
+        {
+          email: parsed.data.email,
+          password: parsed.data.password,
+          displayName: parsed.data.displayName ?? null,
+          username: parsed.data.username ?? null,
+        },
+        { userAgent: request.headers['user-agent'] ?? null, ip: key },
+      );
+      limiter.record(key, true);
+      deps.audit.log({ actor: result.userId, action: 'auth.register' });
+      return reply
+        .header('set-cookie', deps.auth.buildCookie(result.token))
+        .status(201)
+        .send({
+          ...sessionPayload({ csrfToken: result.csrfToken, username: result.username, role: result.role, userId: result.userId }),
+          recoveryCode: result.recoveryCode,
+        });
+    } catch (error) {
+      limiter.record(key, false);
+      return sendError(reply, 409, 'CONFLICT', error instanceof Error ? error.message : 'Inscription impossible.');
+    }
+  });
+
+  /** Ouverture ou fermeture des inscriptions (administrateur de l'installation). */
+  app.put('/api/auth/registration', async (request, reply) => {
+    const session = requireSession(request, reply, { admin: true });
+    if (!session) return reply;
+    const parsed = z.object({ open: z.boolean() }).safeParse(request.body);
+    if (!parsed.success || !deps.settings) return sendError(reply, 400, 'INVALID_REQUEST', 'Requête invalide.');
+    deps.settings.set(REGISTRATION_SETTING, parsed.data.open ? 'open' : 'closed');
+    deps.audit.log({ actor: session.username ?? session.userId, action: parsed.data.open ? 'auth.registration_opened' : 'auth.registration_closed' });
+    return reply.send(sessionPayload(session));
   });
 
   /* ------------------------------------------------------------- connexion */
@@ -526,7 +605,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
   app.get('/api/auth/accounts', async (request, reply) => {
     const session = requireSession(request, reply, { owner: true });
     if (!session) return reply;
-    const payload: AccountListResponse = { accounts: deps.auth.listAccounts() };
+    const payload: AccountListResponse = { accounts: deps.auth.listAccounts(session.tenantId) };
     return reply.send(payload);
   });
 
@@ -581,6 +660,10 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
     if (session.role !== 'OWNER' && params.data.id !== session.userId) {
       return sendError(reply, 403, 'FORBIDDEN', 'Seul le propriétaire peut agir sur ce compte.');
     }
+    // Jamais sur un compte d'un autre espace.
+    if (!deps.auth.belongsTo(params.data.id, session.tenantId)) {
+      return sendError(reply, 404, 'NOT_FOUND', 'Compte introuvable.');
+    }
     try {
       const { recoveryCode } = deps.auth.regenerateRecoveryCode(params.data.id);
       deps.audit.log({
@@ -608,6 +691,9 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
         `Nouveau mot de passe refusé : ${MIN_PASSWORD_LENGTH} caractères minimum.`,
       );
     }
+    if (!deps.auth.belongsTo(params.data.id, session.tenantId)) {
+      return sendError(reply, 404, 'NOT_FOUND', 'Compte introuvable.');
+    }
     try {
       const { recoveryCode } = await deps.auth.resetPasswordForced(params.data.id, body.data.newPassword);
       deps.audit.log({
@@ -632,7 +718,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesD
       return sendError(reply, 400, 'INVALID_REQUEST', 'Requête invalide.');
     }
     try {
-      let account = deps.auth.listAccounts().find((row) => row.id === params.data.id) ?? null;
+      let account = deps.auth.listAccounts(session.tenantId).find((row) => row.id === params.data.id) ?? null;
       if (!account) return sendError(reply, 404, 'NOT_FOUND', 'Compte introuvable.');
       if (body.data.username !== undefined) {
         account = deps.auth.setUsername(params.data.id, body.data.username);

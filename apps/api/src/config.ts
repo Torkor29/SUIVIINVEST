@@ -67,6 +67,8 @@ export interface AppConfig {
   readonly enableBankingRedirectUrl: string | null;
   /** Connexion avec Google (sinon réglable par le propriétaire dans l'application). */
   readonly googleClientId: string | null;
+  /** Répertoire des bases des personnes inscrites (défaut : « tenants » à côté de la base). */
+  readonly tenantsDirectory?: string;
   readonly googleClientSecret: string | null;
   /** Chiffre les sauvegardes sur le disque avec une clé dérivée de la clé maîtresse. */
   readonly backupEncryption: boolean;
@@ -189,6 +191,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     backupEncryption: parseBoolean(env.SUIVIINVEST_BACKUP_ENCRYPTION, true),
     enableBankingRedirectUrl: nonEmpty(env.SUIVIINVEST_ENABLEBANKING_REDIRECT_URL),
     googleClientId: nonEmpty(env.SUIVIINVEST_GOOGLE_CLIENT_ID),
+    ...(nonEmpty(env.SUIVIINVEST_TENANTS_DIR) ? { tenantsDirectory: nonEmpty(env.SUIVIINVEST_TENANTS_DIR) as string } : {}),
     googleClientSecret: nonEmpty(env.SUIVIINVEST_GOOGLE_CLIENT_SECRET),
   };
 }

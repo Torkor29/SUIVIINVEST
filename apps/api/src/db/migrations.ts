@@ -481,6 +481,19 @@ CREATE TABLE oauth_states (
 );
 `;
 
+/**
+ * Version 10 — espaces séparés.
+ *
+ * `users.tenant_id` : espace de données du compte. NULL = espace principal
+ * (installation d'origine : le propriétaire et les membres qu'il invite
+ * partagent le même patrimoine). Une personne qui s'inscrit elle-même reçoit
+ * son propre espace (sa propre base), invisible des autres.
+ */
+const TENANTS_V10 = `
+ALTER TABLE users ADD COLUMN tenant_id TEXT;
+CREATE INDEX idx_users_tenant ON users(tenant_id);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'core', statements: [CORE_V1] },
   { version: 2, name: 'real_estate', statements: [REAL_ESTATE_V2] },
@@ -491,4 +504,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 7, name: 'account_email_and_resets', statements: [ACCOUNT_EMAIL_V7] },
   { version: 8, name: 'manual_portfolio', statements: [MANUAL_PORTFOLIO_V8] },
   { version: 9, name: 'google_sign_in', statements: [GOOGLE_SIGN_IN_V9] },
+  { version: 10, name: 'tenants', statements: [TENANTS_V10] },
 ];

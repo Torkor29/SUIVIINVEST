@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { GoogleConfigResponse, GoogleStatusResponse } from '@suiviinvest/api-contract';
-import type { AuditRepository } from '../repositories/connections.ts';
+import type { AuditRepository, SettingsRepository } from '../repositories/connections.ts';
+import { REGISTRATION_SETTING } from './auth.ts';
 import { GOOGLE_BROWSER_COOKIE, GoogleAuthError, type GoogleAuth } from '../security/google.ts';
 import { SESSION_COOKIE, type AuthService, type AuthenticatedSession } from '../security/sessions.ts';
 import { sendError } from './auth.ts';
@@ -25,6 +26,8 @@ export interface GoogleRoutesDeps {
   readonly auth: AuthService;
   readonly google: GoogleAuth;
   readonly audit: AuditRepository;
+  /** Réglages de l'installation : ouverture des inscriptions. */
+  readonly settings?: SettingsRepository;
   readonly publicUrl: string | null;
   readonly trustProxy: boolean;
   readonly cookieSecure: boolean;
@@ -65,7 +68,7 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, deps: Googl
       sendError(reply, 403, 'FORBIDDEN', 'Jeton CSRF manquant ou invalide.');
       return null;
     }
-    if (owner && current.role !== 'OWNER') {
+    if (owner && !current.admin) {
       sendError(reply, 403, 'FORBIDDEN', 'Seul le propriétaire peut régler la connexion avec Google.');
       return null;
     }
@@ -136,10 +139,12 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, deps: Googl
       return back(reply, '/profil', 'linked');
     }
 
-    const outcome = await auth.googleSignIn(result.identity, {
-      userAgent: request.headers['user-agent'] ?? null,
-      ip: request.ip,
-    });
+    const outcome = await auth.googleSignIn(
+      result.identity,
+      { userAgent: request.headers['user-agent'] ?? null, ip: request.ip },
+      // Inscription libre (ouverte par défaut) : un nouveau compte Google reçoit son propre espace.
+      { allowRegistration: (deps.settings?.get(REGISTRATION_SETTING) ?? 'open') !== 'closed' },
+    );
     if (outcome.outcome === 'NOT_INVITED') {
       audit.log({ actor: 'google', action: 'auth.google_not_invited' });
       return back(reply, '/', 'not_invited');
@@ -148,11 +153,16 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, deps: Googl
     if (outcome.outcome === 'OTHER_GOOGLE_ACCOUNT' || !('session' in outcome)) return back(reply, '/', 'other_account');
     audit.log({
       actor: outcome.session.username ?? outcome.session.userId,
-      action: outcome.outcome === 'CREATED_OWNER' ? 'auth.setup_google' : 'auth.login_google',
+      action:
+        outcome.outcome === 'CREATED_OWNER'
+          ? 'auth.setup_google'
+          : outcome.outcome === 'REGISTERED'
+            ? 'auth.register_google'
+            : 'auth.login_google',
     });
     return reply
       .header('set-cookie', [auth.buildCookie(outcome.session.token), browserCookie('', 0)])
-      .redirect(outcome.outcome === 'CREATED_OWNER' ? '/?google=welcome' : '/', 302);
+      .redirect(outcome.outcome === 'LOGGED_IN' ? '/' : '/?google=welcome', 302);
   });
 
   app.delete('/api/auth/google/link', async (request, reply) => {
@@ -181,7 +191,7 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, deps: Googl
   app.get('/api/auth/google/config', async (request, reply) => {
     const current = session(request);
     if (!current) return sendError(reply, 401, 'UNAUTHENTICATED', 'Session expirée ou absente.');
-    if (current.role !== 'OWNER') return sendError(reply, 403, 'FORBIDDEN', 'Réservé au propriétaire.');
+    if (!current.admin) return sendError(reply, 403, 'FORBIDDEN', 'Réservé à l’administrateur de l’installation.');
     return reply.send(await configBody(request));
   });
 

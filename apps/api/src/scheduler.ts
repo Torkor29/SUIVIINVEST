@@ -26,7 +26,12 @@ export interface SchedulerOptions {
   };
   readonly logger: Logger;
   readonly sync: SyncService;
-  readonly backup: BackupService;
+  readonly backup: Pick<BackupService, 'create'>;
+  /**
+   * Exécute une tâche dans chaque espace (une base par personne inscrite).
+   * Absent : une seule exécution (installation mono-espace, tests).
+   */
+  readonly forEachTenant?: (work: () => Promise<void> | void) => Promise<void>;
   /** Fuseau horaire des tâches planifiées (par défaut : celui du serveur). */
   readonly timezone?: string;
 }
@@ -49,6 +54,11 @@ export class Scheduler implements SchedulerState {
     this.#options = options;
   }
 
+  async #everywhere(work: () => Promise<void> | void): Promise<void> {
+    if (this.#options.forEachTenant) await this.#options.forEachTenant(work);
+    else await work();
+  }
+
   start(): void {
     if (!this.#options.enabled) {
       this.#options.logger.info('Ordonnanceur désactivé (SUIVIINVEST_SCHEDULER_ENABLED=0)');
@@ -66,12 +76,15 @@ export class Scheduler implements SchedulerState {
         this.#lastRunAt = new Date().toISOString();
         logger.info('Synchronisation planifiée démarrée', { cron: this.#options.syncCron });
         try {
-          const outcomes = await sync.syncAll('SCHEDULED');
-          logger.info('Synchronisation planifiée terminée', {
-            total: outcomes.length,
-            succeeded: outcomes.filter((outcome) => outcome.status === 'SUCCESS').length,
-            failed: outcomes.filter((outcome) => outcome.status === 'FAILED').length,
-            created: outcomes.reduce((acc, outcome) => acc + outcome.created, 0),
+          await this.#everywhere(async () => {
+            const outcomes = await sync.syncAll('SCHEDULED');
+            if (outcomes.length === 0) return;
+            logger.info('Synchronisation planifiée terminée', {
+              total: outcomes.length,
+              succeeded: outcomes.filter((outcome) => outcome.status === 'SUCCESS').length,
+              failed: outcomes.filter((outcome) => outcome.status === 'FAILED').length,
+              created: outcomes.reduce((acc, outcome) => acc + outcome.created, 0),
+            });
           });
         } catch (error) {
           logger.error('Synchronisation planifiée en échec', {
@@ -81,10 +94,12 @@ export class Scheduler implements SchedulerState {
       },
     );
 
-    this.#backupJob = new Cron(this.#options.backupCron, { protect: true }, () => {
+    this.#backupJob = new Cron(this.#options.backupCron, { protect: true }, async () => {
       try {
-        const files = backup.create('all');
-        logger.info('Sauvegarde automatique effectuée', { files: files.map((file) => file.name) });
+        await this.#everywhere(() => {
+          const files = backup.create('all');
+          logger.info('Sauvegarde automatique effectuée', { files: files.map((file) => file.name) });
+        });
       } catch (error) {
         logger.error('Sauvegarde automatique en échec', {
           error: error instanceof Error ? error.message : String(error),
@@ -92,10 +107,12 @@ export class Scheduler implements SchedulerState {
       }
     });
 
-    this.#snapshotJob = new Cron(this.#options.snapshotCron, { protect: true }, () => {
+    this.#snapshotJob = new Cron(this.#options.snapshotCron, { protect: true }, async () => {
       try {
-        const result = this.#options.snapshots.recordDailySnapshot();
-        logger.info('Relevé de patrimoine enregistré', result);
+        await this.#everywhere(() => {
+          const result = this.#options.snapshots.recordDailySnapshot();
+          logger.info('Relevé de patrimoine enregistré', result);
+        });
       } catch (error) {
         logger.error('Relevé de patrimoine en échec', {
           error: error instanceof Error ? error.message : String(error),
@@ -126,14 +143,17 @@ export class Scheduler implements SchedulerState {
     const holdings = this.#options.holdings;
     if (!holdings) return;
     try {
-      const result = await holdings.refreshAll();
-      this.#options.logger.info('Cours et investissements programmés à jour', {
-        instruments: result.instruments,
-        quotes: result.quotes,
-        executions: result.executions,
-        errors: result.errors.length,
+      await this.#everywhere(async () => {
+        const result = await holdings.refreshAll();
+        if (result.instruments === 0) return;
+        this.#options.logger.info('Cours et investissements programmés à jour', {
+          instruments: result.instruments,
+          quotes: result.quotes,
+          executions: result.executions,
+          errors: result.errors.length,
+        });
+        for (const error of result.errors.slice(0, 5)) this.#options.logger.warn(error);
       });
-      for (const error of result.errors.slice(0, 5)) this.#options.logger.warn(error);
     } catch (error) {
       this.#options.logger.error('Mise à jour des cours en échec', {
         error: error instanceof Error ? error.message : String(error),
@@ -143,7 +163,9 @@ export class Scheduler implements SchedulerState {
 
   /** Exécute immédiatement une synchronisation complète (bouton « Synchroniser tout »). */
   async runSyncNow(): Promise<void> {
-    await this.#options.sync.syncAll('MANUAL');
+    await this.#everywhere(async () => {
+      await this.#options.sync.syncAll('MANUAL');
+    });
   }
 
   isRunning(): boolean {

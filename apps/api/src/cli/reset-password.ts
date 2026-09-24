@@ -123,7 +123,7 @@ async function main(argv: readonly string[]): Promise<number> {
   });
 
   if (args.has('list')) {
-    const accounts = auth.listAccounts();
+    const accounts = auth.listAllAccounts();
     if (accounts.length === 0) {
       process.stdout.write('Aucun compte : ouvrez l’application pour créer le premier.\n');
       return 0;
@@ -145,7 +145,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   const username = requested.trim().toLowerCase();
   const account = auth
-    .listAccounts()
+    .listAllAccounts()
     .find((row) => (row.username ?? '(sans identifiant)') === username || row.id === username);
   if (!account) {
     process.stderr.write(`Compte introuvable : ${username}\n`);

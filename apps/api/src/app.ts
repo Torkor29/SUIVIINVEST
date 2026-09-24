@@ -2,6 +2,8 @@ import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { createTenantDb, currentTenantId, enterRequestScope, MAIN_TENANT, selectTenant, TenantRegistry } from './db/tenants.ts';
 import { z } from 'zod';
 import {
   ConnectorRegistry,
@@ -88,6 +90,9 @@ export interface BuiltApp {
   readonly imports: ImportService;
   readonly marketData: MarketDataService;
   readonly backup: BackupService;
+  /** Espaces (une base par personne inscrite) et sauvegardes par espace. */
+  readonly tenants: TenantRegistry;
+  readonly backups: TenantBackups;
   readonly portfolio: PortfolioService;
   readonly crypto: CryptoService;
   readonly realEstate: RealEstateService;
@@ -122,26 +127,34 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   await app.register(cookie);
 
-  const secrets = new SecretsStore(db, config.masterKey);
+  // Espaces séparés : `db` est la base principale (comptes, sessions, espace
+  // « main ») ; `data` aiguille chaque requête vers la base de l'espace en cours.
+  const tenants = new TenantRegistry(db, config.tenantsDirectory ?? join(dirname(config.databasePath), 'tenants'));
+  const data = createTenantDb();
+  // Identifiants Google de l'installation : base principale, jamais celle d'un espace.
+  const mainSecrets = new SecretsStore(db, config.masterKey);
+  const secrets = new SecretsStore(data, config.masterKey);
   const auth = new AuthService(db, {
     ttlMinutes: config.sessionTtlMinutes,
     cookieSecure: config.cookieSecure,
     masterKey: config.masterKey,
   });
   const mailer = deps.mailer ?? createMailer({ smtpUrl: config.smtpUrl, from: config.mailFrom });
-  const audit = new AuditRepository(db);
-  const settings = new SettingsRepository(db);
-  const properties = new PropertyRepository(db);
-  const portfolio = new PortfolioService(db, { baseCurrency: config.baseCurrency });
-  const crypto = new CryptoService(db, { baseCurrency: config.baseCurrency });
-  const realEstate = new RealEstateService(db);
+  const mainAudit = new AuditRepository(db);
+  const mainSettings = new SettingsRepository(db);
+  const audit = new AuditRepository(data);
+  const settings = new SettingsRepository(data);
+  const properties = new PropertyRepository(data);
+  const portfolio = new PortfolioService(data, { baseCurrency: config.baseCurrency });
+  const crypto = new CryptoService(data, { baseCurrency: config.baseCurrency });
+  const realEstate = new RealEstateService(data);
   const marketData = new MarketDataService({
-    db,
+    db: data,
     ...(deps.providers ? { providers: deps.providers } : {}),
     ...(deps.now ? { now: deps.now } : {}),
   });
   const marketFetch = deps.marketFetch ?? (useE2eConnectors ? createE2eMarketFetch() : undefined);
-  const holdings = new HoldingsService(db, {
+  const holdings = new HoldingsService(data, {
     client: new MarketClient({
       ...(marketFetch ? { fetchImpl: marketFetch, retryDelayMs: 0 } : {}),
       ...(deps.now ? { now: deps.now } : {}),
@@ -152,14 +165,20 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // réel. Non configurés, ils restent inertes et le connecteur le dit en clair.
   const sidecars =
     deps.registry === undefined && !useE2eConnectors ? createSidecarTransports({ logger }) : undefined;
-  const sync = new SyncService(db, registry, secrets, {
+  const sync = new SyncService(data, registry, secrets, {
     baseCurrency: config.baseCurrency,
     logger,
     integrationKeys: config.integrationKeys,
     ...(sidecars ? { sidecars: { ...sidecars } } : {}),
     ...(deps.connectorHttp ? { http: deps.connectorHttp } : {}),
   });
-  const imports = new ImportService(db, { baseCurrency: config.baseCurrency, registry });
+  const imports = new ImportService(data, { baseCurrency: config.baseCurrency, registry });
+  const backups = new TenantBackups(data, {
+    directory: config.backupDirectory,
+    retentionDays: config.backupRetentionDays,
+    ...(config.backupEncryption ? { masterKey: config.masterKey } : {}),
+  });
+  // Sauvegarde de l'espace principal (tâche planifiée historique).
   const backup = new BackupService(db, {
     directory: config.backupDirectory,
     retentionDays: config.backupRetentionDays,
@@ -178,6 +197,10 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   /* ------------------------------------------------------------- middleware */
 
   const apiLimiter = new RateLimiter(API_RATE_LIMIT);
+
+  // Chaque requête ouvre un contexte vide ; l'espace est choisi après
+  // l'authentification. Sans espace, toute lecture de données échoue.
+  app.addHook('onRequest', (_request, _reply, done) => enterRequestScope(done));
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin;
@@ -234,6 +257,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       }
     }
     (request as { session?: unknown }).session = session;
+    selectTenant(tenants, session.tenantId);
     return undefined;
   });
 
@@ -266,14 +290,15 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   /* ----------------------------------------------------------------- routes */
 
-  await registerAuthRoutes(app, { auth, audit, mailer, publicUrl: config.publicUrl, logger });
+  await registerAuthRoutes(app, { auth, audit: mainAudit, settings: mainSettings, mailer, publicUrl: config.publicUrl, logger });
   // Connexion avec Google (proposée dès que l'application Google est configurée).
   await registerGoogleAuthRoutes(app, {
     auth,
-    audit,
+    audit: mainAudit,
+    settings: mainSettings,
     google: new GoogleAuth({
       db,
-      secrets,
+      secrets: mainSecrets,
       env: { clientId: config.googleClientId, clientSecret: config.googleClientSecret },
       ...(deps.googleFetch ? { fetchImpl: deps.googleFetch } : {}),
     }),
@@ -281,17 +306,17 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     trustProxy: config.trustProxy,
     cookieSecure: config.cookieSecure,
   });
-  await registerWealthRoutes(app, { db, portfolio, crypto, realEstate, properties });
+  await registerWealthRoutes(app, { db: data, portfolio, crypto, realEstate, properties });
   // Saisie manuelle : indispensable pour les sources qui ne fournissent pas les
   // positions (Crédit Agricole) — l'utilisateur complète ce que l'API ne donne pas.
-  await registerManualRoutes(app, { db });
+  await registerManualRoutes(app, { db: data });
   // Portefeuille saisi à la main : actifs, achats, ventes, investissements programmés.
   await registerHoldingsRoutes(app, { holdings, audit });
   // Portefeuilles EVM : état par chaîne et resynchronisation d'un wallet.
-  await registerWalletRoutes(app, { db, sync });
+  await registerWalletRoutes(app, { db: data, sync });
   // Banques via Enable Banking : configuration, choix de la banque, retour d'autorisation.
   await registerEnableBankingRoutes(app, {
-    db,
+    db: data,
     secrets,
     sync,
     logger,
@@ -303,13 +328,14 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     ...(deps.now ? { now: deps.now } : {}),
   });
   await registerAdminRoutes(app, {
-    db,
+    db: data,
+    mainDb: db,
     registry,
     secrets,
     sync,
     imports,
     marketData,
-    backup,
+    backups,
     audit,
     settings,
     logger,
@@ -350,7 +376,25 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     });
   }
 
-  return { app, db, auth, secrets, sync, imports, marketData, backup, portfolio, crypto, realEstate, settings, audit, properties, holdings };
+  return {
+    app,
+    db,
+    auth,
+    secrets,
+    sync,
+    imports,
+    marketData,
+    backup,
+    backups,
+    tenants,
+    portfolio,
+    crypto,
+    realEstate,
+    settings,
+    audit,
+    properties,
+    holdings,
+  };
 }
 
 /**
@@ -387,4 +431,34 @@ export function isSameOrigin(
   const candidates = [first(headers.host)];
   if (config.trustProxy) candidates.push(first(headers['x-forwarded-host']));
   return candidates.some((host) => host !== null && host === originHost);
+}
+
+/**
+ * Sauvegardes par espace : l'espace principal dans le répertoire habituel, chaque
+ * personne inscrite dans `tenants/<espace>/`.
+ */
+export class TenantBackups {
+  readonly #data: Db;
+  readonly #options: { directory: string; retentionDays: number; masterKey?: string };
+  readonly #services = new Map<string, BackupService>();
+
+  constructor(data: Db, options: { directory: string; retentionDays: number; masterKey?: string }) {
+    this.#data = data;
+    this.#options = options;
+  }
+
+  /** Service de sauvegarde de l'espace courant (requête ou tâche planifiée). */
+  current(): BackupService {
+    const tenantId = currentTenantId();
+    if (tenantId === null) throw new Error('Sauvegarde hors espace.');
+    let service = this.#services.get(tenantId);
+    if (!service) {
+      service = new BackupService(this.#data, {
+        ...this.#options,
+        directory: tenantId === MAIN_TENANT ? this.#options.directory : join(this.#options.directory, 'tenants', tenantId),
+      });
+      this.#services.set(tenantId, service);
+    }
+    return service;
+  }
 }

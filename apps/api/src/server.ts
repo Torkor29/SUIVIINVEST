@@ -4,6 +4,7 @@ import { Db } from './db/database.ts';
 import { createLogger } from './logger.ts';
 import { SyncRunRepository } from './repositories/connections.ts';
 import { Scheduler } from './scheduler.ts';
+import { forEachTenant } from './db/tenants.ts';
 
 /**
  * Point d'entrée du serveur.
@@ -43,7 +44,15 @@ async function main(): Promise<void> {
     snapshotCron: config.snapshotCron,
     logger,
     sync: built.sync,
-    backup: built.backup,
+    // Sauvegarde de l'espace en cours d'exécution (principal ou personne inscrite).
+    backup: { create: (kind) => built.backups.current().create(kind) },
+    forEachTenant: (work) =>
+      forEachTenant(built.tenants, work, (tenantId, error) =>
+        logger.error('Tâche planifiée en échec pour un espace', {
+          tenant: tenantId === 'main' ? 'main' : `${tenantId.slice(0, 4)}…`,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
     // Le relevé quotidien est enregistré par l'application : il est marqué
     // `RECORDED`, par opposition à l'historique reconstruit depuis les activités.
     snapshots: {
@@ -66,7 +75,8 @@ async function main(): Promise<void> {
     scheduler.stop();
     try {
       await built.app.close();
-      db.close();
+      built.tenants.closeAll();
+    db.close();
       logger.info('Arrêt propre terminé');
       process.exit(0);
     } catch (error) {

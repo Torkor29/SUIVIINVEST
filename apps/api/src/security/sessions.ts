@@ -1,4 +1,5 @@
 import type { Db } from '../db/database.ts';
+import { MAIN_TENANT } from '../db/tenants.ts';
 import { randomToken, safeEqual, sha256 } from './crypto.ts';
 import { hashPassword, verifyPassword } from './password.ts';
 import { generateRecoveryCode, hashRecoveryCode, verifyRecoveryCode } from './recovery.ts';
@@ -35,6 +36,10 @@ export interface AuthenticatedSession {
   readonly sessionId: string;
   readonly username: string | null;
   readonly role: AccountRole;
+  /** Espace de données du compte (« main » = espace principal). */
+  readonly tenantId: string;
+  /** Administrateur de l'installation : propriétaire de l'espace principal. */
+  readonly admin: boolean;
 }
 
 export type AccountRole = 'OWNER' | 'MEMBER';
@@ -54,6 +59,11 @@ export interface AccountRow {
   readonly email_index: string | null;
   readonly google_sub?: string | null;
   readonly password_set?: number;
+  readonly tenant_id?: string | null;
+}
+
+function tenantOf(row: AccountRow): string {
+  return row.tenant_id ?? MAIN_TENANT;
 }
 
 /** Vue publique d'un compte : jamais de hachage, jamais de code. */
@@ -277,8 +287,8 @@ export class AuthService {
     const id = randomToken(12);
     this.#db.run(
       `INSERT INTO users (id, username, display_name, role, password_hash, recovery_hash,
-                          created_at, updated_at, password_changed_at, created_by, password_set)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          created_at, updated_at, password_changed_at, created_by, password_set, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       username,
       input.displayName ?? null,
@@ -290,6 +300,8 @@ export class AuthService {
       input.password === null ? null : now,
       actor.userId,
       input.password === null ? 0 : 1,
+      // Un membre invité partage l'espace de celui qui l'invite.
+      actor.tenantId === MAIN_TENANT ? null : actor.tenantId,
     );
     if (email !== null) this.#writeEmail(id, email);
     const created = this.#findById(id);
@@ -479,8 +491,65 @@ export class AuthService {
     return { username: account.username, recoveryCode };
   }
 
-  listAccounts(): AccountSummary[] {
+  /** Tous les comptes (outil en ligne de commande de l'administrateur du serveur). */
+  listAllAccounts(): AccountSummary[] {
     return this.#all().map(toSummary);
+  }
+
+  /** Comptes d'un espace (jamais ceux des autres espaces). */
+  listAccounts(tenantId: string): AccountSummary[] {
+    return this.#all().filter((row) => tenantOf(row) === tenantId).map(toSummary);
+  }
+
+  /** Administrateur de l'installation : propriétaire de l'espace principal. */
+  isAdmin(userId: string): boolean {
+    const row = this.#findById(userId);
+    return row !== null && row.role === 'OWNER' && tenantOf(row) === MAIN_TENANT;
+  }
+
+  /** Le compte appartient-il à cet espace ? (toute action sur un compte le vérifie). */
+  belongsTo(userId: string, tenantId: string): boolean {
+    const row = this.#findById(userId);
+    return row !== null && tenantOf(row) === tenantId;
+  }
+
+  /**
+   * Inscription libre : un nouveau compte PROPRIÉTAIRE de son propre espace,
+   * vide et invisible des autres.
+   */
+  async register(
+    input: { email: string; password: string; displayName?: string | null; username?: string | null },
+    meta: SessionMeta,
+  ): Promise<LoginSuccess & { recoveryCode: string }> {
+    const email = this.#prepareEmail(input.email, null);
+    if (email === null) throw new Error('Adresse e-mail requise.');
+    const username = input.username ? normalizeUsername(input.username) : null;
+    if (username !== null) {
+      const problem = validateUsername(username);
+      if (problem) throw new Error(problem);
+      if (this.#findByUsername(username)) throw new Error('Cet identifiant est déjà utilisé.');
+    }
+    const id = newTenantId();
+    const recoveryCode = generateRecoveryCode();
+    const now = new Date().toISOString();
+    this.#db.run(
+      `INSERT INTO users (id, username, display_name, role, password_hash, recovery_hash, created_at, updated_at,
+                          password_changed_at, last_login_at, tenant_id)
+       VALUES (?, ?, ?, 'OWNER', ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      username,
+      input.displayName?.trim() || null,
+      await hashPassword(input.password),
+      hashRecoveryCode(recoveryCode),
+      now,
+      now,
+      now,
+      now,
+      id,
+    );
+    this.#writeEmail(id, email);
+    const session = this.#createSession(id, meta);
+    return { ...session, userId: id, username, role: 'OWNER' as AccountRole, recoveryCode };
   }
 
   /**
@@ -491,7 +560,9 @@ export class AuthService {
     const account = this.#findById(userId);
     if (!account) throw new Error('Compte introuvable.');
     if (disabled && account.role === 'OWNER') {
-      const activeOwners = this.#all().filter((row) => row.role === 'OWNER' && row.disabled_at === null);
+      const activeOwners = this.#all().filter(
+        (row) => row.role === 'OWNER' && row.disabled_at === null && tenantOf(row) === tenantOf(account),
+      );
       if (activeOwners.length <= 1) {
         throw new Error('Impossible de désactiver le dernier propriétaire actif.');
       }
@@ -564,6 +635,8 @@ export class AuthService {
       sessionId: row.id,
       username: account.username,
       role: (account.role === 'OWNER' ? 'OWNER' : 'MEMBER') as AccountRole,
+      tenantId: tenantOf(account),
+      admin: account.role === 'OWNER' && tenantOf(account) === MAIN_TENANT,
     };
   }
 
@@ -668,8 +741,9 @@ export class AuthService {
   async googleSignIn(
     identity: { sub: string; email: string; name: string | null },
     meta: SessionMeta,
+    options: { allowRegistration?: boolean } = {},
   ): Promise<
-    | { outcome: 'LOGGED_IN' | 'CREATED_OWNER'; session: LoginSuccess }
+    | { outcome: 'LOGGED_IN' | 'CREATED_OWNER' | 'REGISTERED'; session: LoginSuccess }
     | { outcome: 'DISABLED' | 'NOT_INVITED' | 'OTHER_GOOGLE_ACCOUNT' }
   > {
     const bySub = this.#db.get<AccountRow>('SELECT * FROM users WHERE google_sub = ?', identity.sub) ?? null;
@@ -701,6 +775,27 @@ export class AuthService {
       this.#writeEmail('owner', normalizeEmail(identity.email));
       const owner = this.#findById('owner') as AccountRow;
       return { outcome: 'CREATED_OWNER', session: this.#openSession(owner, meta) };
+    }
+    if (options.allowRegistration) {
+      // Inscription libre : son propre espace, vide.
+      const id = newTenantId();
+      const now = new Date().toISOString();
+      this.#db.run(
+        `INSERT INTO users (id, username, display_name, role, password_hash, recovery_hash, created_at, updated_at,
+                            password_changed_at, last_login_at, google_sub, password_set, tenant_id)
+         VALUES (?, NULL, ?, 'OWNER', ?, ?, ?, ?, NULL, ?, ?, 0, ?)`,
+        id,
+        identity.name,
+        await hashPassword(randomToken(32)),
+        hashRecoveryCode(generateRecoveryCode()),
+        now,
+        now,
+        now,
+        identity.sub,
+        id,
+      );
+      this.#writeEmail(id, normalizeEmail(identity.email));
+      return { outcome: 'REGISTERED', session: this.#openSession(this.#findById(id) as AccountRow, meta) };
     }
     return { outcome: 'NOT_INVITED' };
   }
@@ -936,4 +1031,8 @@ export function readCookie(cookieHeader: string | undefined, name: string): stri
     if (key === name) return rest.join('=');
   }
   return null;
+}
+/** Identifiant d'un nouvel espace (et de son compte) : 16 caractères aléatoires. */
+function newTenantId(): string {
+  return randomToken(12).replace(/[^A-Za-z0-9]/g, 'x');
 }

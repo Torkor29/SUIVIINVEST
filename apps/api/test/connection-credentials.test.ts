@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { authRequest, createTestApp, login } from './helpers.ts';
+import { authRequest, createTestApp, login, inMainSpace } from './helpers.ts';
 
 /**
  * Identifiants des connexions : saisis dans l'interface, chiffrés, remplaçables
@@ -29,8 +29,8 @@ test('les identifiants d’une connexion sont chiffrés puis remplacés sur plac
       payload: { secrets: { degiro_password: 'nouveau-mot-de-passe' }, config: { degiro_int_account: '123' } },
     });
     assert.equal(patched.statusCode, 200, patched.body);
-    assert.equal(await ctx.app.secrets.get(`${id}:degiro_password`), 'nouveau-mot-de-passe');
-    assert.equal(await ctx.app.secrets.get(`${id}:degiro_username`), 'julie');
+    assert.equal(await inMainSpace(ctx, () => ctx.app.secrets.get(`${id}:degiro_password`)), 'nouveau-mot-de-passe');
+    assert.equal(await inMainSpace(ctx, () => ctx.app.secrets.get(`${id}:degiro_username`)), 'julie');
 
     // La liste des connexions ne contient que les NOMS des secrets.
     const list = await authRequest(ctx, session, { method: 'GET', url: '/api/connections' });

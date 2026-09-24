@@ -10,6 +10,7 @@ import {
 } from '@suiviinvest/connectors';
 import type { AssetKind, AccountType, ProviderId } from '@suiviinvest/core';
 import { buildApp, type BuiltApp } from '../src/app.ts';
+import { runInTenant } from '../src/db/tenants.ts';
 import { loadConfig } from '../src/config.ts';
 import { Db } from '../src/db/database.ts';
 import { createSilentLogger } from '../src/logger.ts';
@@ -329,4 +330,11 @@ export function seedActivity(
     now,
   );
   return id;
+}
+/**
+ * Appel direct d'un service, hors requête HTTP, dans l'espace principal (celui
+ * du propriétaire créé par `login`). Sans espace, l'accès aux données échoue.
+ */
+export function inMainSpace<T>(context: TestContext, work: () => T): T {
+  return runInTenant(context.app.tenants, 'main', work);
 }

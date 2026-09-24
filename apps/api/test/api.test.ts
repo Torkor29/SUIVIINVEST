@@ -27,6 +27,8 @@ test('parcours complet : configuration, session, écriture protégée par CSRF',
   const sessionInfo = await ctx.app.app.inject({ method: 'GET', url: '/api/auth/session' });
   assert.deepEqual(sessionInfo.json(), {
     authenticated: false,
+    admin: false,
+    registrationOpen: true,
     csrfToken: null,
     needsSetup: true,
     username: null,

@@ -9,6 +9,7 @@ import {
   seedInstrument,
   seedQuote,
   type TestContext,
+  inMainSpace,
 } from './helpers.ts';
 
 /**
@@ -151,7 +152,7 @@ test('les relevés quotidiens sont enregistrés et distingués de la reconstitut
   const session = await login(ctx);
 
   // Un relevé est enregistré (comme le ferait l'ordonnanceur).
-  const recorded = ctx.app.portfolio.recordDailySnapshot();
+  const recorded = inMainSpace(ctx, () => ctx.app.portfolio.recordDailySnapshot());
   assert.ok(recorded.accounts >= 6, 'le relevé détaille chaque compte');
 
   const stored = ctx.db.get<{ source: string; liabilities: number; positions_count: number }>(

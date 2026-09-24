@@ -38,6 +38,10 @@ export type AccountRole = 'OWNER' | 'MEMBER';
 
 export interface SessionResponse {
   readonly authenticated: boolean;
+  /** Administrateur de l'installation (propriétaire de l'espace principal). */
+  readonly admin?: boolean;
+  /** Inscription libre ouverte (mot de passe ou Google). */
+  readonly registrationOpen?: boolean;
   /** Jeton CSRF à renvoyer dans l'en-tête `x-csrf-token` sur les écritures. */
   readonly csrfToken: string | null;
   readonly needsSetup: boolean;

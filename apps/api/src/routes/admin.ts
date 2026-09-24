@@ -74,12 +74,14 @@ function toSyncOutcomeDto(outcome: SyncOutcome): SyncOutcomeDto {
 
 export interface AdminRoutesDeps {
   readonly db: Db;
+  /** Base principale (santé du serveur, hors espace). */
+  readonly mainDb: Db;
   readonly registry: ConnectorRegistry;
   readonly secrets: SecretsStore;
   readonly sync: SyncService;
   readonly imports: ImportService;
   readonly marketData: MarketDataService;
-  readonly backup: BackupService;
+  readonly backups: { current(): BackupService };
   readonly audit: AuditRepository;
   readonly settings: SettingsRepository;
   readonly logger: Logger;
@@ -104,16 +106,18 @@ export interface AdminRoutesDeps {
 export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoutesDeps): Promise<void> {
   const connections = new ConnectionRepository(deps.db);
   const runs = new SyncRunRepository(deps.db);
+  // /health est public (hors espace) : il ne lit que la base principale.
+  const mainRuns = new SyncRunRepository(deps.mainDb);
 
   app.get('/health', async (_request, reply) => {
-    const health = deps.db.health();
+    const health = deps.mainDb.health();
     const payload: HealthResponse = {
       status: health.ok ? 'ok' : 'degraded',
       version: deps.config.version,
       uptimeSeconds: Math.round((Date.now() - deps.startedAt) / 1000),
       database: health,
       connectors: deps.registry.list().length,
-      lastSyncAt: runs.lastSuccessAt(),
+      lastSyncAt: mainRuns.lastSuccessAt(),
     };
     return reply.code(health.ok ? 200 : 503).send(payload);
   });
@@ -426,7 +430,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
         enabled: deps.config.backupRetentionDays > 0,
         cron: deps.config.backupCron,
         directory: deps.config.backupDirectory,
-        lastBackupAt: deps.backup.list()[0]?.createdAt ?? null,
+        lastBackupAt: deps.backups.current().list()[0]?.createdAt ?? null,
         retentionDays: deps.config.backupRetentionDays,
       },
       scheduler: { enabled: deps.scheduler.isRunning(), cron: deps.config.schedulerCron },
@@ -464,13 +468,13 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminRoute
 
   app.post('/api/backup/export', async (request, reply) => {
     const query = z.object({ kind: z.enum(['sqlite', 'json', 'csv', 'all']).optional() }).parse(request.query);
-    const files = deps.backup.create(query.kind ?? 'all');
+    const files = deps.backups.current().create(query.kind ?? 'all');
     deps.audit.log({ actor: 'owner', action: 'backup.create', details: { files: files.map((file) => file.name) } });
-    const payload: BackupExportResponse = { files, excludedTables: deps.backup.excludedTables };
+    const payload: BackupExportResponse = { files, excludedTables: deps.backups.current().excludedTables };
     return reply.send(payload);
   });
 
-  app.get('/api/backup/list', async (_request, reply) => reply.send(deps.backup.list()));
+  app.get('/api/backup/list', async (_request, reply) => reply.send(deps.backups.current().list()));
 
   app.get('/api/audit', async (request, reply) => {
     const query = z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }).parse(request.query);
