@@ -99,6 +99,7 @@ export class CryptoService {
         .map((position) => {
           const instrument = position.instrumentId ? this.#instruments.get(position.instrumentId) : null;
           return {
+            instrumentId: position.instrumentId ?? null,
             chain: instrument?.chain ?? 'unknown',
             symbol: instrument?.symbol ?? '—',
             name: instrument?.name ?? position.instrumentId,
@@ -137,7 +138,9 @@ export class CryptoService {
     const byChainMap = new Map<string, number>();
     for (const wallet of wallets) {
       for (const asset of wallet.assets) {
-        byChainMap.set(asset.chain, round((byChainMap.get(asset.chain) ?? 0) + asset.valueEur));
+        // Plateformes et saisies manuelles : pas de réseau à afficher.
+        const chain = asset.chain === 'unknown' ? 'Hors blockchain' : asset.chain;
+        byChainMap.set(chain, round((byChainMap.get(chain) ?? 0) + asset.valueEur));
       }
     }
 
@@ -183,6 +186,7 @@ export class CryptoService {
       const quote = latestQuotes.get(position.instrumentId);
       const price: number | null = quote ? quote.close : position.unitPrice;
       assets.push({
+        instrumentId: position.instrumentId,
         chain: position.chain ?? 'unknown',
         symbol: position.symbol ?? '—',
         name: position.name,

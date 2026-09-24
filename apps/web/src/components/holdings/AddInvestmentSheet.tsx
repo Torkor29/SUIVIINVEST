@@ -26,28 +26,43 @@ export function AddInvestmentSheet({
   onAdded,
   initialAsset,
   initialMode = 'buy',
+  scope = 'all',
 }: {
   readonly onClose: () => void;
   readonly onAdded: () => void;
   readonly initialAsset?: HoldingAssetDto;
   readonly initialMode?: 'buy' | 'plan';
+  /** « crypto » : depuis l'onglet Crypto, seules les cryptos sont proposées. */
+  readonly scope?: 'all' | 'crypto';
 }) {
   const [step, setStep] = useState<Step>(initialAsset ? { kind: 'details', asset: initialAsset, warning: null } : { kind: 'search' });
   const navigate = useNavigate();
 
   const title =
-    step.kind === 'details' ? step.asset.name : step.kind === 'manual' ? 'Actif sans cotation publique' : 'Ajouter un investissement';
+    step.kind === 'details'
+      ? step.asset.name
+      : step.kind === 'manual'
+        ? 'Actif sans cotation publique'
+        : scope === 'crypto'
+          ? 'Ajouter une crypto'
+          : 'Ajouter un investissement';
   const subtitle =
     step.kind === 'details'
       ? [step.asset.symbol, step.asset.kindLabel, step.asset.exchange].filter(Boolean).join(' · ')
       : step.kind === 'manual'
         ? 'Obligation, fonds non coté, part de SCPI… vous indiquez vous-même le cours.'
-        : 'Action, ETF, fonds, crypto : cherchez par nom, symbole ou ISIN.';
+        : scope === 'crypto'
+          ? 'Cherchez par nom ou symbole, puis indiquez ce que vous détenez : aucun wallet à relier.'
+          : 'Action, ETF, fonds, crypto : cherchez par nom, symbole ou ISIN.';
 
   return (
     <Sheet title={title} subtitle={subtitle} onClose={onClose} testId="add-investment">
       {step.kind === 'search' && (
-        <AssetSearch onPicked={(asset, warning) => setStep({ kind: 'details', asset, warning })} onManual={() => setStep({ kind: 'manual' })} />
+        <AssetSearch
+          scope={scope}
+          onPicked={(asset, warning) => setStep({ kind: 'details', asset, warning })}
+          onManual={() => setStep({ kind: 'manual' })}
+        />
       )}
       {step.kind === 'manual' && (
         <ManualAssetForm onCreated={(asset) => setStep({ kind: 'details', asset, warning: null })} onBack={() => setStep({ kind: 'search' })} />
@@ -69,9 +84,11 @@ export function AddInvestmentSheet({
 }
 
 function AssetSearch({
+  scope,
   onPicked,
   onManual,
 }: {
+  readonly scope: 'all' | 'crypto';
   readonly onPicked: (asset: HoldingAssetDto, warning: string | null) => void;
   readonly onManual: () => void;
 }) {
@@ -104,6 +121,8 @@ function AssetSearch({
     };
   }, [query]);
 
+  const shown = (results?.results ?? []).filter((item) => scope === 'all' || item.kind === 'CRYPTO');
+
   const pick = (item: AssetSearchResultDto): void => {
     const payload: AddAssetRequest = {
       source: item.source,
@@ -130,7 +149,7 @@ function AssetSearch({
         className="input input-lg"
         type="search"
         autoFocus
-        placeholder="Nvidia, AAPL, MSCI World, IE00B5BMR087, Bitcoin…"
+        placeholder={scope === 'crypto' ? 'Bitcoin, ETH, Solana…' : 'Nvidia, AAPL, MSCI World, IE00B5BMR087, Bitcoin…'}
         value={query}
         data-testid="asset-search"
         onChange={(event) => setQuery(event.target.value)}
@@ -145,7 +164,7 @@ function AssetSearch({
       )}
       <ul className="list search-results" data-testid="asset-results">
         {searching && results === null && <li className="muted small">Recherche…</li>}
-        {(results?.results ?? []).map((item) => (
+        {shown.map((item) => (
           <li key={`${item.source}-${item.priceSymbol}`}>
             <button type="button" className="list-row search-result" disabled={add.pending} onClick={() => pick(item)}>
               <span className="logo" aria-hidden="true">
@@ -162,13 +181,17 @@ function AssetSearch({
             </button>
           </li>
         ))}
-        {results !== null && results.results.length === 0 && !searching && (
-          <li className="muted small">Aucun résultat. Essayez le symbole (NVDA, AI.PA pour Air Liquide…) ou l’ISIN.</li>
+        {results !== null && shown.length === 0 && !searching && (
+          <li className="muted small">
+            {scope === 'crypto' ? 'Aucune crypto trouvée. Essayez le symbole (BTC, ETH…).' : 'Aucun résultat. Essayez le symbole (NVDA, AI.PA pour Air Liquide…) ou l’ISIN.'}
+          </li>
         )}
       </ul>
-      <button type="button" className="btn btn-link" onClick={onManual} data-testid="asset-manual">
-        Actif introuvable ou sans cotation (obligation, fonds…) ? L’ajouter à la main
-      </button>
+      {scope === 'all' && (
+        <button type="button" className="btn btn-link" onClick={onManual} data-testid="asset-manual">
+          Actif introuvable ou sans cotation (obligation, fonds…) ? L’ajouter à la main
+        </button>
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ export function SummaryStrip({ data, period }: { readonly data: NetWorthResponse
     <section className="hero">
       <div className="hero-main">
         <span className="hero-label">Patrimoine net</span>
+        <span className="hero-scope">Tout ce que vous possédez (banque, investissements, crypto, immobilier), dettes déduites.</span>
         <strong className="hero-value" data-testid="networth-total">
           {formatEur(data.total)}
         </strong>

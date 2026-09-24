@@ -41,16 +41,23 @@ test('ajout d’une action, achat puis investissement programmé rattrapé', asy
   await expect(page.getByTestId('plans-list')).toContainText('NVIDIA Corporation');
 });
 
-test('crypto achetée par montant, visible dans le portefeuille', async ({ page }) => {
+test('crypto ajoutée depuis l’onglet Crypto (par montant), visible dans Crypto et le portefeuille', async ({ page }) => {
   await page.goto('/');
-  await gotoSection(page, 'Investissements');
-  await page.getByTestId('add-investment-open').click();
+  await gotoSection(page, 'Crypto');
+  await page.getByTestId('add-crypto-open').click();
   const sheet = page.getByTestId('add-investment');
+  await expect(sheet.getByRole('heading', { name: 'Ajouter une crypto' })).toBeVisible();
+  await expect(sheet.getByTestId('asset-manual')).toHaveCount(0);
   await sheet.getByTestId('asset-search').fill('bitcoin');
   await sheet.getByTestId('asset-results').getByRole('button', { name: /Bitcoin/ }).click();
   await sheet.getByRole('button', { name: 'Montant' }).click();
   await sheet.getByTestId('operation-amount').fill('500');
   await sheet.getByTestId('operation-submit').click();
+  await expect(page.getByTestId('asset-name')).toHaveText('Bitcoin');
+  await gotoSection(page, 'Crypto');
+  const manual = page.locator('.card', { hasText: 'Mes cryptos' });
+  await expect(manual).toContainText('Saisie manuelle');
+  await manual.getByRole('link', { name: 'BTC' }).click();
   await expect(page.getByTestId('asset-name')).toHaveText('Bitcoin');
   await gotoSection(page, 'Investissements');
   await expect(page.getByTestId('holdings-list')).toContainText('Bitcoin');

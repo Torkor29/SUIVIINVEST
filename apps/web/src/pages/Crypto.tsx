@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { CryptoResponse } from '@suiviinvest/api-contract';
 import { request } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
@@ -8,25 +10,49 @@ import { SkeletonLines, SkeletonTiles } from '../components/ui/Skeleton.tsx';
 import { StatTile, Badge } from '../components/ui/Stat.tsx';
 import { AllocationLegend, ReadOnlyNote, WarningsList } from '../components/ui/AllocationLegend.tsx';
 import { DonutChart } from '../components/charts/DonutChart.tsx';
+import { AddInvestmentSheet } from '../components/holdings/AddInvestmentSheet.tsx';
 
-/** Crypto : portefeuilles MetaMask (lecture seule), actifs par chaîne. */
+/** Compte « Mes cryptos » : cryptos saisies à la main (voir services/holdings.ts). */
+const MANUAL_CRYPTO_ADDRESS = 'manual-crypto';
+
+/**
+ * Crypto : cryptos saisies à la main (aucun wallet à relier), wallets suivis par
+ * leur adresse publique et plateformes en lecture seule.
+ */
 export function CryptoPage() {
   const state = useAsync<CryptoResponse>((signal) => request<CryptoResponse>('/api/crypto', { signal }), []);
+  const [adding, setAdding] = useState(false);
+  const actions = (
+    <span className="card-actions-row">
+      <button type="button" className="btn btn-primary" onClick={() => setAdding(true)} data-testid="add-crypto-open">
+        Ajouter une crypto
+      </button>
+      <Link className="btn" to="/connexions">
+        Relier un wallet
+      </Link>
+    </span>
+  );
 
   return (
     <>
       <PageHeader
         title="Crypto"
-        subtitle="Vos wallets (adresse publique) et plateformes (clé en lecture seule). Aucune clé privée de wallet n’est demandée."
-        actions={<Badge tone="info">Lecture seule</Badge>}
+        subtitle="Ajoutez vos cryptos à la main, sans rien relier. Ou suivez un wallet (adresse publique) ou une plateforme (clé en lecture seule)."
+        actions={actions}
       />
+      {adding && <AddInvestmentSheet scope="crypto" onClose={() => setAdding(false)} onAdded={state.reload} />}
       <AsyncView
         loading={state.loading}
         error={state.error}
         data={state.data}
         onRetry={state.reload}
         empty={(data) => data.wallets.length === 0}
-        emptyState={<EmptyState title="Aucun portefeuille" hint="Ajoutez un wallet (MetaMask, Ledger, Phantom…) ou une plateforme (Binance, Kraken, Coinbase, Bitpanda) dans Connexions." />}
+        emptyState={
+          <EmptyState
+            title="Aucune crypto pour l’instant"
+            hint="Le plus simple : « Ajouter une crypto », puis la quantité et la date d’achat ; les cours se mettent à jour tout seuls. Wallets (MetaMask, Ledger, Phantom…) et plateformes (Binance, Kraken, Coinbase, Bitpanda) se relient aussi."
+          />
+        }
         skeleton={
           <>
             <SkeletonTiles count={3} />
@@ -60,24 +86,38 @@ export function CryptoPage() {
                 key={wallet.accountId}
                 title={wallet.name}
                 subtitle={
-                  isPlatform(wallet.address)
+                  wallet.address === MANUAL_CRYPTO_ADDRESS
+                    ? 'Saisie manuelle · touchez une crypto pour ses achats'
+                    : isPlatform(wallet.address)
                     ? 'Plateforme · lecture seule'
                     : `${shortenAddress(wallet.address)} · ${wallet.chains.length} réseau${wallet.chains.length > 1 ? 'x' : ''}`
                 }
-                actions={<Badge tone="neutral">{wallet.lastSyncedAt === null ? 'Jamais synchronisé' : `Synchro ${formatDate(wallet.lastSyncedAt)}`}</Badge>}
+                actions={
+                  wallet.address === MANUAL_CRYPTO_ADDRESS ? undefined : (
+                    <Badge tone="neutral">{wallet.lastSyncedAt === null ? 'Jamais synchronisé' : `Synchro ${formatDate(wallet.lastSyncedAt)}`}</Badge>
+                  )
+                }
               >
                 <div className="wallet-total">
                   <strong>{formatEur(wallet.valueEur)}</strong>
-                  {!isPlatform(wallet.address) && <span className="muted small">{shortenAddress(wallet.address, 10, 6)}</span>}
+                  {!isPlatform(wallet.address) && wallet.address !== MANUAL_CRYPTO_ADDRESS && <span className="muted small">{shortenAddress(wallet.address, 10, 6)}</span>}
                 </div>
                 <ul className="asset-list">
                   {wallet.assets.map((asset) => (
                     <li key={`${wallet.accountId}-${asset.symbol}-${asset.chain}`} className="asset-row">
                       <span className="asset-symbol">
-                        <strong>{asset.symbol}</strong>
+                        {wallet.address === MANUAL_CRYPTO_ADDRESS && asset.instrumentId !== null ? (
+                          <Link to={`/investissements/${asset.instrumentId}`} className="asset-link">
+                            <strong>{asset.symbol}</strong>
+                          </Link>
+                        ) : (
+                          <strong>{asset.symbol}</strong>
+                        )}
                         <small className="cell-sub">{asset.name}</small>
                       </span>
-                      <Badge tone="neutral">{asset.chain === 'unknown' ? 'plateforme' : asset.chain}</Badge>
+                      <Badge tone="neutral">
+                        {wallet.address === MANUAL_CRYPTO_ADDRESS ? 'manuel' : asset.chain === 'unknown' ? 'plateforme' : asset.chain}
+                      </Badge>
                       <span className="asset-qty">
                         {formatQuantity(asset.quantity)}
                         {asset.contractAddress !== null && <small className="cell-sub">{shortenAddress(asset.contractAddress, 8, 4)}</small>}

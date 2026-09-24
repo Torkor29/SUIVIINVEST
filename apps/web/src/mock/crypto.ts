@@ -58,6 +58,7 @@ export const RAW_WALLETS: readonly {
 export function buildWallets(): CryptoWalletDto[] {
   return RAW_WALLETS.map((wallet) => {
     const assets: CryptoAssetDto[] = wallet.assets.map((asset) => ({
+      instrumentId: null,
       chain: asset.chain,
       symbol: asset.symbol,
       name: asset.name,

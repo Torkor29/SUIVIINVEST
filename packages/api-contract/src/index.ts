@@ -353,6 +353,8 @@ export interface PerformanceMetricsDto {
 /* -------------------------------------------------------------------- crypto */
 
 export interface CryptoAssetDto {
+  /** Instrument suivi (fiche détaillée pour les cryptos saisies à la main). */
+  readonly instrumentId: string | null;
   readonly chain: string;
   readonly symbol: string;
   readonly name: string;

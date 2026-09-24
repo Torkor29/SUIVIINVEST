@@ -149,6 +149,13 @@
   font-weight: 550;
 }
 
+.hero-scope {
+  max-width: 46ch;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
 .hero-value {
   font-family: var(--font-display);
   font-size: clamp(40px, 6vw, 60px);
@@ -991,6 +998,13 @@ a.list-row:hover {
 
 .asset-row:last-child {
   border-bottom: 0;
+}
+
+.asset-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--border-strong);
 }
 
 .asset-symbol {

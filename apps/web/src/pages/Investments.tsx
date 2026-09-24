@@ -74,6 +74,7 @@ export function InvestmentsPage() {
             <section className="hero hero-with-actions">
               <div className="hero-main">
                 <span className="hero-label">Mes investissements</span>
+                <span className="hero-scope">Actions, ETF, fonds et cryptos, au cours du marché : plus-values et achats programmés.</span>
                 <strong className="hero-value" data-testid="holdings-total">
                   {formatEur(data.totals.value)}
                 </strong>
