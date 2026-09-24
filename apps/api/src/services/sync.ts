@@ -69,6 +69,8 @@ export interface SyncOutcome {
   readonly userAction: string | null;
   readonly durationMs: number;
   readonly warnings: readonly string[];
+  /** Positions (avoirs) relevées à la source. */
+  readonly positions?: number;
 }
 
 /** Traduit un code d'erreur technique en consigne utilisateur, sans jargon. */
@@ -267,6 +269,7 @@ export class SyncService {
         userAction: null,
         durationMs,
         warnings: report.warnings,
+        positions: positions.length,
       };
     } catch (error) {
       const connectorError = error instanceof ConnectorError ? error : null;

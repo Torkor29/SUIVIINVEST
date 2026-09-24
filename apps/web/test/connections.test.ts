@@ -103,14 +103,15 @@ test('describeSyncOutcome produit la phrase demandée', () => {
   const outcome = {
     status: 'SUCCESS' as const,
     created: 37,
-    updated: 12,
-    skipped: 0,
+    updated: 0,
+    skipped: 3,
     errors: 0,
     durationMs: 4200,
+    positions: 12,
   };
   assert.equal(
     describeSyncOutcome(outcome),
-    '37 transactions récupérées, 12 positions mises à jour, 0 doublon créé, durée 4,2 s',
+    '37 transactions récupérées, 12 positions relevées, 3 déjà connues ignorées, durée 4,2 s',
   );
 });
 
@@ -125,7 +126,7 @@ test('describeSyncOutcome gère les singuliers et les erreurs', () => {
   };
   assert.equal(
     describeSyncOutcome(outcome),
-    '1 transaction récupérée, 1 position mise à jour, 2 doublons créés, 1 erreur, durée 1,2 s',
+    '1 transaction récupérée, 1 transaction mise à jour, 2 déjà connues ignorées, 1 erreur, durée 1,2 s',
   );
 });
 

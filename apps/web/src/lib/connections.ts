@@ -296,19 +296,20 @@ function formatDecimal(value: number, digits: number): string {
 export type SyncOutcomeLike = Pick<
   SyncOutcomeDto,
   'created' | 'updated' | 'skipped' | 'errors' | 'durationMs' | 'status'
->;
+> & { readonly positions?: number | undefined };
 
 /**
  * Résumé lisible d'un retour de synchronisation :
- * « 37 transactions récupérées, 12 positions mises à jour, 0 doublon créé, durée 4,2 s ».
+ * « 37 transactions récupérées, 12 positions relevées, 3 déjà connues ignorées, durée 4,2 s ».
+ * `updated` compte des transactions corrigées à la source, `skipped` des
+ * transactions déjà enregistrées (aucun doublon n'est créé).
  */
 export function describeSyncOutcome(outcome: SyncOutcomeLike | null | undefined): string {
   if (outcome === null || outcome === undefined) return 'Aucun retour de synchronisation.';
-  const parts = [
-    plural(Math.max(outcome.created, 0), 'transaction récupérée', 'transactions récupérées'),
-    plural(Math.max(outcome.updated, 0), 'position mise à jour', 'positions mises à jour'),
-    plural(Math.max(outcome.skipped, 0), 'doublon créé', 'doublons créés'),
-  ];
+  const parts = [plural(Math.max(outcome.created, 0), 'transaction récupérée', 'transactions récupérées')];
+  if (outcome.positions !== undefined) parts.push(plural(Math.max(outcome.positions, 0), 'position relevée', 'positions relevées'));
+  if (outcome.updated > 0) parts.push(plural(outcome.updated, 'transaction mise à jour', 'transactions mises à jour'));
+  if (outcome.skipped > 0) parts.push(plural(outcome.skipped, 'déjà connue ignorée', 'déjà connues ignorées'));
   if (outcome.errors > 0) parts.push(plural(outcome.errors, 'erreur', 'erreurs'));
   parts.push(`durée ${formatSyncDuration(outcome.durationMs)}`);
   return parts.join(', ');
@@ -429,7 +430,7 @@ export function syncAllHeadline(summary: SyncAllSummaryView): string {
   const ok = summary.succeeded + summary.partial;
   const pieces = [`${ok} source(s) sur ${summary.total} ont répondu`];
   pieces.push(`${summary.created} transaction(s) récupérée(s)`);
-  pieces.push(`${summary.updated} position(s) mise(s) à jour`);
+  if (summary.updated > 0) pieces.push(`${summary.updated} transaction(s) mise(s) à jour`);
   if (summary.authRequired > 0) pieces.push(`${summary.authRequired} validation(s) requise(s)`);
   if (summary.failed > 0) pieces.push(`${summary.failed} échec(s)`);
   return `${pieces.join(', ')}.`;

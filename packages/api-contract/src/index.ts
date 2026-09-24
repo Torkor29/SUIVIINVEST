@@ -575,6 +575,8 @@ export interface SyncOutcomeDto {
   readonly durationMs: number;
   /** Avertissements non bloquants (donnée approximée, taux manquant...). */
   readonly warnings: readonly string[];
+  /** Positions (avoirs) relevées à la source : wallets, plateformes, courtiers. */
+  readonly positions?: number;
 }
 
 export interface SyncAllResponse {

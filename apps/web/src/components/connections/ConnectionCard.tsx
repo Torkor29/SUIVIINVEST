@@ -330,7 +330,8 @@ export function ConnectionCard({
           </span>
           <span data-testid="connection-accounts">
             Comptes&nbsp;: <strong>{accounts.count}</strong> · Valeur récupérée&nbsp;:{' '}
-            <strong>{formatEur(accounts.valueEur, 0)}</strong>
+            {/* Centimes pour les petits montants : 0,29 € ne doit pas s'afficher « 0 € ». */}
+            <strong>{formatEur(accounts.valueEur, Math.abs(accounts.valueEur) < 100 ? 2 : 0)}</strong>
           </span>
         </div>
 
