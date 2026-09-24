@@ -4,6 +4,7 @@ import type { MarketDataRefreshResponse } from '@suiviinvest/api-contract';
 import type { Db } from '../db/database.ts';
 import { InstrumentRepository } from '../repositories/accounts.ts';
 import { MarketRepository } from '../repositories/market.ts';
+import { onvistaHistory, onvistaResolve } from './onvista.ts';
 
 /**
  * Module market data.
@@ -71,7 +72,11 @@ export class MarketDataService {
    * résultat non vide est conservé (fallback automatique).
    */
   async refresh(options: { force?: boolean } = {}): Promise<MarketDataRefreshResponse> {
-    const instruments = this.#instruments.list().filter((instrument) => instrument.kind !== 'CASH');
+    // Les actifs suivis à la main (source de cotation choisie) sont rafraîchis
+    // par le portefeuille, en euros : on n'y écrit pas d'autres cours.
+    const instruments = this.#instruments
+      .list()
+      .filter((instrument) => instrument.kind !== 'CASH' && !instrument.price_source);
     const today = this.#now().toISOString().slice(0, 10);
     const stats = new Map<string, { instruments: number; errors: number }>();
     let refreshed = 0;
@@ -218,6 +223,44 @@ export class YahooProvider implements PriceProvider {
 }
 
 /**
+ * Onvista : actions, ETF et fonds identifiés par ISIN (positions synchronisées
+ * depuis un courtier). Cotations en euros sur les places européennes.
+ */
+export class OnvistaProvider implements PriceProvider {
+  readonly name = 'onvista';
+  readonly #fetchImpl: typeof fetch;
+  readonly #resolved = new Map<string, string | null>();
+
+  constructor(fetchImpl: typeof fetch = fetch) {
+    this.#fetchImpl = fetchImpl;
+  }
+
+  async fetchQuotes(instrument: InstrumentRef): Promise<Quote[] | null> {
+    if (!instrument.isin || instrument.kind === 'CRYPTO') return null;
+    const ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+    let priceSymbol = this.#resolved.get(instrument.isin);
+    if (priceSymbol === undefined) {
+      const found = await onvistaResolve(this.#fetchImpl, { isin: instrument.isin, name: null, symbol: null, kind: instrument.kind }, ua);
+      priceSymbol = found?.priceSymbol ?? null;
+      this.#resolved.set(instrument.isin, priceSymbol);
+    }
+    if (!priceSymbol) return null;
+    const from = new Date(Date.now() - 2 * 365 * 86_400_000).toISOString().slice(0, 10);
+    const history = await onvistaHistory(this.#fetchImpl, priceSymbol, from, ua);
+    if (!history) return null;
+    const fetchedAt = new Date().toISOString();
+    return history.points.map((point) => ({
+      instrumentId: instrument.id,
+      date: point.date,
+      close: round(point.close, 8),
+      currency: history.currency,
+      provider: this.name,
+      fetchedAt,
+    }));
+  }
+}
+
+/**
  * CoinGecko : prix crypto sans clé (quota public limité).
  * Le couple (chaîne, adresse de contrat) est résolu vers un identifiant
  * CoinGecko via la recherche publique.
@@ -319,7 +362,7 @@ export class EcbFxProvider implements PriceProvider {
 }
 
 export function defaultProviders(): PriceProvider[] {
-  return [new YahooProvider(), new CoinGeckoProvider(), new EcbFxProvider()];
+  return [new OnvistaProvider(), new YahooProvider(), new CoinGeckoProvider(), new EcbFxProvider()];
 }
 
 /** Fournisseur de test : déterministe, aucune sortie réseau. */

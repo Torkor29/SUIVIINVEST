@@ -5,6 +5,7 @@ import { AccountRepository, InstrumentRepository } from '../repositories/account
 import { ActivityRepository, toDomainActivity, ValuationRepository } from '../repositories/activities.ts';
 import { ConnectionRepository } from '../repositories/connections.ts';
 import { MarketRepository } from '../repositories/market.ts';
+import { MANUAL_CRYPTO_ID } from './holdings.ts';
 
 /**
  * Vue crypto.
@@ -66,6 +67,8 @@ export class CryptoService {
       }
 
       const rows = this.#activities.listForAccount(account.id);
+      // « Mes cryptos » (saisie manuelle) vide : rien à montrer, rien à signaler.
+      if (rows.length === 0 && account.external_account_id === MANUAL_CRYPTO_ID && !account.connection_id) continue;
       if (rows.length === 0) {
         wallets.push({
           accountId: account.id,

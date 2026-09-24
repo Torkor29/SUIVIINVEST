@@ -914,10 +914,10 @@ export interface MarketDataRefreshResponse {
 /* ------------------------------------------------ portefeuille saisi à la main */
 
 export type HoldingKind = 'EQUITY' | 'ETF' | 'FUND' | 'BOND' | 'CRYPTO' | 'OTHER';
-export type HoldingPriceSource = 'yahoo' | 'coingecko' | 'manual';
+export type HoldingPriceSource = 'onvista' | 'yahoo' | 'coingecko' | 'manual';
 
 export interface AssetSearchResultDto {
-  readonly source: 'yahoo' | 'coingecko';
+  readonly source: 'onvista' | 'yahoo' | 'coingecko';
   readonly priceSymbol: string;
   readonly symbol: string;
   readonly name: string;
@@ -934,7 +934,7 @@ export interface AssetSearchResponse {
 
 export interface AddAssetRequest {
   readonly source: HoldingPriceSource;
-  /** Symbole de la source (Yahoo « NVDA », CoinGecko « bitcoin ») ; absent pour « manual ». */
+  /** Symbole de la source (Onvista « STOCK:92472 », Yahoo « NVDA », CoinGecko « bitcoin ») ; absent pour « manual ». */
   readonly priceSymbol?: string;
   readonly symbol?: string;
   readonly name: string;

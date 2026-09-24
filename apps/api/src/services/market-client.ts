@@ -1,13 +1,16 @@
 import type { HoldingKind } from '@suiviinvest/api-contract';
+import { onvistaHistory, onvistaResolve, onvistaSearch, type OnvistaSearchResult } from './onvista.ts';
 
 /**
  * Cours de marché pour le portefeuille saisi à la main : recherche d'un actif,
  * historique des cours, taux de change.
  *
  * Sources gratuites, sans clé, avec repli automatique :
- *  - **Yahoo Finance** (actions, ETF, fonds, cryptos « BTC-EUR ») : historique
- *    long, couverture mondiale. Endpoint public non contractuel, parfois limité
- *    (HTTP 429) : deux hôtes sont essayés, avec une nouvelle tentative ;
+ *  - **Onvista** (actions, ETF, fonds) : source principale. Recherche par nom,
+ *    ticker ou ISIN, cotations en euros, historique long ;
+ *  - **Yahoo Finance** (actions, ETF, fonds, cryptos « BTC-EUR ») : secours.
+ *    Endpoint public non contractuel, souvent limité (HTTP 429) depuis un
+ *    serveur : deux hôtes sont essayés, avec une nouvelle tentative ;
  *  - **Stooq** : secours pour les actions quand Yahoo refuse ;
  *  - **CoinGecko** (cryptos) : recherche et 365 jours d'historique en euros ;
  *  - **Kraken** : secours crypto (environ 2 ans d'historique en euros) ;
@@ -17,11 +20,11 @@ import type { HoldingKind } from '@suiviinvest/api-contract';
  * Aucune valeur n'est inventée : une source muette renvoie `null`, jamais un 0.
  */
 
-export type PriceSource = 'yahoo' | 'coingecko' | 'manual';
+export type PriceSource = 'onvista' | 'yahoo' | 'coingecko' | 'manual';
 
 export interface AssetSearchResult {
   readonly source: Exclude<PriceSource, 'manual'>;
-  /** Symbole de cotation dans la source (Yahoo : « NVDA », CoinGecko : « bitcoin »). */
+  /** Symbole de cotation dans la source (Onvista « STOCK:92472 », Yahoo « NVDA », CoinGecko « bitcoin »). */
   readonly priceSymbol: string;
   /** Symbole affiché (« NVDA », « BTC »). */
   readonly symbol: string;
@@ -63,6 +66,12 @@ const BROWSER_UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const YAHOO_HOSTS = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'] as const;
 const ISIN_PATTERN = /^[A-Z]{2}[A-Z0-9]{9}\d$/;
+/**
+ * Actions « tokenisées » (xStocks, Ondo, Robinhood…) : jetons qui imitent une
+ * action. Chercher « Nvidia » ne doit pas proposer un jeton crypto à la place
+ * de l'action.
+ */
+const TOKENIZED_STOCK = /stock|tokeni[sz]ed|securities|robinhood token|dinari|backed|reality protocol|\(ondo/i;
 
 const YAHOO_KIND: Readonly<Record<string, HoldingKind>> = {
   EQUITY: 'EQUITY',
@@ -104,23 +113,47 @@ export class MarketClient {
     if (cached && Date.now() - cached.at < 10 * 60_000) return cached.outcome;
 
     const unavailable: string[] = [];
-    const [yahoo, gecko] = await Promise.all([
-      this.#yahooSearch(q).catch(() => {
-        unavailable.push('Yahoo Finance (actions, ETF)');
-        return [] as AssetSearchResult[];
+    let onvistaDown = false;
+    const [onvista, gecko] = await Promise.all([
+      onvistaSearch(this.#fetch, q, BROWSER_UA).catch(() => {
+        onvistaDown = true;
+        return [] as OnvistaSearchResult[];
       }),
       this.#geckoSearch(q).catch(() => {
         unavailable.push('CoinGecko (cryptos)');
         return [] as AssetSearchResult[];
       }),
     ]);
+    const securities: AssetSearchResult[] = onvista.map((item) => ({
+      source: 'onvista',
+      priceSymbol: item.priceSymbol,
+      symbol: item.symbol ?? item.isin ?? item.name,
+      name: item.name,
+      kind: item.kind,
+      exchange: null,
+      typeLabel: item.typeLabel,
+      isin: item.isin,
+    }));
+    // Yahoo seulement en secours : Onvista muet, ou rien trouvé.
+    let yahoo: AssetSearchResult[] = [];
+    if (securities.length === 0) {
+      yahoo = await this.#yahooSearch(q).catch(() => {
+        // Signalé seulement si aucune source de titres n'a répondu.
+        if (onvistaDown) unavailable.push('Onvista et Yahoo Finance (actions, ETF)');
+        return [] as AssetSearchResult[];
+      });
+    }
     // Une crypto trouvée des deux côtés n'apparaît qu'une fois (CoinGecko gardé :
     // identifiant stable, historique en euros).
     const geckoSymbols = new Set(gecko.map((item) => item.symbol.toUpperCase()));
-    const results = [
+    const others = [
+      ...securities,
       ...yahoo.filter((item) => !(item.kind === 'CRYPTO' && geckoSymbols.has(item.symbol.toUpperCase()))),
-      ...gecko,
     ];
+    // « bitcoin », « ETH » : la crypto d'abord ; sinon les titres d'abord.
+    const lower = q.toLowerCase();
+    const cryptoFirst = gecko.some((item) => item.symbol.toLowerCase() === lower || item.name.toLowerCase() === lower);
+    const results = cryptoFirst ? [...gecko, ...others] : [...others, ...gecko];
     const outcome: SearchOutcome = { results, unavailable };
     if (unavailable.length === 0) this.#searchCache.set(cacheKey, { at: Date.now(), outcome });
     return outcome;
@@ -164,6 +197,7 @@ export class MarketClient {
     };
     return (payload.coins ?? [])
       .filter((coin) => coin.id && coin.symbol && coin.name)
+      .filter((coin) => !TOKENIZED_STOCK.test(`${coin.id} ${coin.name}`))
       // Les jetons sans rang de capitalisation sont presque toujours des imitations.
       .filter((coin, index) => index < 2 || (coin.market_cap_rank ?? Number.POSITIVE_INFINITY) < 1500)
       .slice(0, 5)
@@ -189,9 +223,22 @@ export class MarketClient {
   async history(source: PriceSource, priceSymbol: string, from: string): Promise<PriceHistory | null> {
     if (source === 'manual') return null;
     if (source === 'coingecko') return this.#cryptoHistory(priceSymbol, from);
+    if (source === 'onvista') {
+      const onvista = await onvistaHistory(this.#fetch, priceSymbol, from, BROWSER_UA).catch(() => null);
+      return onvista ? { currency: onvista.currency, points: onvista.points, provider: 'onvista', name: onvista.name } : null;
+    }
     const yahoo = await this.#yahooHistory(priceSymbol, from).catch(() => null);
     if (yahoo && yahoo.points.length > 0) return yahoo;
     return this.#stooqHistory(priceSymbol, from).catch(() => null);
+  }
+
+  /**
+   * Équivalent Onvista d'un titre suivi via Yahoo (par ISIN, sinon par nom) :
+   * permet de basculer un actif quand Yahoo ne répond plus.
+   */
+  async resolveOnvista(reference: { isin: string | null; name: string | null; symbol: string | null; kind: string }): Promise<{ priceSymbol: string; isin: string | null } | null> {
+    const found = await onvistaResolve(this.#fetch, reference, BROWSER_UA).catch(() => null);
+    return found ? { priceSymbol: found.priceSymbol, isin: found.isin } : null;
   }
 
   async #cryptoHistory(coinId: string, from: string): Promise<PriceHistory | null> {

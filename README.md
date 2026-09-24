@@ -60,10 +60,14 @@ s'occupe des cours. Aucune connexion à un courtier n'est nécessaire.
      s'ajoutent **automatiquement**. Pause, reprise, modification (pour l'avenir), suppression
      avec ou sans les achats déjà calculés.
 3. La fiche de chaque actif montre le cours (1 S → MAX), la valeur de votre ligne face au
-   montant investi, le PRU, les plus-values, toutes les opérations (supprimables).
+   montant investi, le PRU, les plus-values, toutes les opérations (supprimables)
+   ; « Retirer cet investissement » supprime l'actif ajouté par erreur.
 
-**Cours** : Yahoo Finance (actions, ETF, fonds, cryptos), CoinGecko et Kraken (cryptos),
-Stooq en secours ; taux de change BCE via Frankfurter. Tous sont gratuits et sans clé. Les
+**Cours** : Onvista (actions, ETF, fonds : recherche par nom, ticker ou ISIN, cotations en
+euros), CoinGecko et Kraken (cryptos), Yahoo Finance et Stooq en secours ; taux de change BCE
+via Frankfurter. Tous sont gratuits et sans clé. Yahoo refuse souvent les serveurs (HTTP 429) :
+un actif suivi via Yahoo bascule seul sur Onvista quand le même titre y est retrouvé. Les
+actions « tokenisées » (xStocks, Ondo…) ne sont jamais proposées comme cryptos. Les
 cours sont convertis en euros et rafraîchis quatre fois par jour (8 h, 13 h, 18 h, 23 h à
 l'heure du serveur, UTC sous Docker ; réglable : `SUIVIINVEST_PRICES_CRON`), ainsi qu'au démarrage ; le bouton « Actualiser les cours » force
 une mise à jour. **Obligations et actifs non cotés** : « L'ajouter à la main », puis saisissez

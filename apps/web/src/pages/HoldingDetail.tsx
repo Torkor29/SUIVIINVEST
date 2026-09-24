@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { DcaPlanDto, HoldingDetailResponse, HoldingOperationDto, PeriodKey } from '@suiviinvest/api-contract';
 import { request } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
@@ -204,6 +204,10 @@ export function HoldingDetailPage() {
                 )}
               </Card>
 
+              {(data.plans.length > 0 || data.operations.some((operation) => operation.deletable)) && (
+                <RemoveAsset instrumentId={asset.instrumentId} name={asset.name} />
+              )}
+
               {panel !== null && (
                 <Sheet
                   title={
@@ -244,6 +248,33 @@ export function HoldingDetailPage() {
         }}
       </AsyncView>
     </>
+  );
+}
+
+/** Retirer l'actif : ses opérations saisies et ses achats programmés (erreur d'actif, ligne soldée…). */
+function RemoveAsset({ instrumentId, name }: { readonly instrumentId: string; readonly name: string }) {
+  const remove = useAction();
+  const navigate = useNavigate();
+  return (
+    <div className="danger-zone">
+      <button
+        type="button"
+        className="btn btn-link small tone-down"
+        disabled={remove.pending}
+        data-testid="asset-remove"
+        onClick={() => {
+          if (!window.confirm(`Retirer « ${name} » ? Ses opérations saisies et ses achats programmés seront supprimés.`)) return;
+          void remove.run(async () => {
+            await request(`/api/holdings/assets/${instrumentId}`, { method: 'DELETE' });
+            navigate('/investissements');
+            return null;
+          });
+        }}
+      >
+        Retirer cet investissement
+      </button>
+      <ActionFeedback state={remove} />
+    </div>
   );
 }
 

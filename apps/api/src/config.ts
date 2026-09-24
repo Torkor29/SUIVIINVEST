@@ -179,7 +179,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     snapshotCron: env.SUIVIINVEST_SNAPSHOT_CRON ?? DEFAULTS.snapshotCron,
     pricesCron: env.SUIVIINVEST_PRICES_CRON ?? DEFAULTS.pricesCron,
     backupRetentionDays: requireInt(env.SUIVIINVEST_BACKUP_RETENTION_DAYS, DEFAULTS.backupRetentionDays),
-    marketDataProviders: parseList(env.SUIVIINVEST_MARKET_PROVIDERS, ['yahoo', 'coingecko', 'ecb']),
+    marketDataProviders: parseList(env.SUIVIINVEST_MARKET_PROVIDERS, ['onvista', 'yahoo', 'coingecko', 'ecb']),
     logLevel: (env.SUIVIINVEST_LOG_LEVEL as AppConfig['logLevel']) ?? DEFAULTS.logLevel,
     staticDirectory,
     version: env.SUIVIINVEST_VERSION ?? '0.2.0',

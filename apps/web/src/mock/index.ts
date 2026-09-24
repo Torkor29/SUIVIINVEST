@@ -170,6 +170,7 @@ export function mockRequest(url: string, method: string, body: unknown): unknown
   if (path === '/api/holdings/assets' && method === 'POST') {
     return { asset: demoAsset(bodyField<string>(body, 'symbol', 'NVDA')), quotes: 1250, warning: null };
   }
+  if (path.startsWith('/api/holdings/assets/') && method === 'DELETE') return { ok: true, removedOperations: 0 };
   if (path.startsWith('/api/holdings/assets/') && !path.endsWith('/price')) {
     return holdingDetail(path.split('/')[4] ?? '', periodFrom(params));
   }

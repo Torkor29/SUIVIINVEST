@@ -155,7 +155,7 @@ function AssetSearch({
                 <strong>{item.name}</strong>
                 <span>
                   {item.symbol}
-                  {item.exchange ? ` · ${item.exchange}` : ''}
+                  {item.exchange ? ` · ${item.exchange}` : item.isin && item.isin !== item.symbol ? ` · ${item.isin}` : ''}
                 </span>
               </span>
               <Badge tone={item.kind === 'CRYPTO' ? 'info' : 'neutral'}>{item.typeLabel}</Badge>

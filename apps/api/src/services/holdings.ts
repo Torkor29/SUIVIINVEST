@@ -54,7 +54,11 @@ export const MANUAL_CRYPTO_ID = 'manual-crypto';
 const INVESTMENT_ACCOUNT_TYPES = new Set(['SECURITIES', 'CRYPTO', 'OTHER']);
 const POSITION_TYPES = new Set(['BUY', 'SELL', 'TRANSFER_IN', 'TRANSFER_OUT', 'CRYPTO_TRANSFER', 'STAKING_REWARD', 'SPLIT']);
 /** Historique chargé à l'ajout d'un actif (pour les courbes « Max »). */
-const HISTORY_START: Readonly<Record<'yahoo' | 'coingecko', string>> = { yahoo: '2000-01-01', coingecko: '2014-01-01' };
+const HISTORY_START: Readonly<Record<'onvista' | 'yahoo' | 'coingecko', string>> = {
+  onvista: '2000-01-01',
+  yahoo: '2000-01-01',
+  coingecko: '2014-01-01',
+};
 /** Au-delà, une échéance sans cours est considérée comme « en attente ». */
 const MAX_SETTLEMENT_DAYS = 10;
 
@@ -200,7 +204,13 @@ export class HoldingsService {
     const from =
       options.from ??
       (options.full || !last ? HISTORY_START[source] : shiftDay(last, -7));
-    const history = await this.#client.history(source, instrument.price_symbol, from);
+    let history = await this.#client.history(source, instrument.price_symbol, from);
+    if ((!history || history.points.length === 0) && source === 'yahoo') {
+      // Yahoo refuse souvent les serveurs (HTTP 429) : l'actif bascule sur Onvista
+      // quand le même titre y est retrouvé (ISIN, sinon nom), définitivement.
+      const switched = await this.#switchToOnvista(instrument);
+      if (switched) return this.refreshInstrument(instrumentId, { full: true });
+    }
     if (!history || history.points.length === 0) {
       return { quotes: 0, error: `Cours indisponibles pour ${instrument.name} (source momentanément injoignable).` };
     }
@@ -229,6 +239,30 @@ export class HoldingsService {
     return { quotes: count, error: null };
   }
 
+  async #switchToOnvista(instrument: InstrumentRow): Promise<boolean> {
+    const found = await this.#client.resolveOnvista({
+      isin: instrument.isin,
+      name: instrument.name,
+      symbol: instrument.price_symbol ?? instrument.symbol,
+      kind: instrument.kind,
+    });
+    if (!found) return false;
+    const taken = this.#db.get<{ id: string }>(
+      "SELECT id FROM instruments WHERE price_source = 'onvista' AND price_symbol = ? AND id != ?",
+      found.priceSymbol,
+      instrument.id,
+    );
+    if (taken) return false;
+    this.#db.run(
+      "UPDATE instruments SET price_source = 'onvista', price_symbol = ?, isin = COALESCE(isin, ?), updated_at = ? WHERE id = ?",
+      found.priceSymbol,
+      found.isin,
+      this.#now().toISOString(),
+      instrument.id,
+    );
+    return true;
+  }
+
   /** Cours saisi à la main (obligation, fonds non coté…), en euros ou dans `currency`. */
   async setManualPrice(instrumentId: string, date: string, price: number, currency = 'EUR'): Promise<void> {
     const instrument = this.#requireInstrument(instrumentId);
@@ -252,7 +286,7 @@ export class HoldingsService {
    */
   async refreshAll(): Promise<{ instruments: number; quotes: number; errors: string[]; executions: number }> {
     const rows = this.#db.all<{ id: string }>(
-      `SELECT id FROM instruments WHERE price_source IN ('yahoo','coingecko') AND price_symbol IS NOT NULL`,
+      `SELECT id FROM instruments WHERE price_source IN ('onvista','yahoo','coingecko') AND price_symbol IS NOT NULL`,
     );
     let quotes = 0;
     const errors: string[] = [];
@@ -368,6 +402,36 @@ export class HoldingsService {
       }
     }
     this.#db.run('DELETE FROM activities WHERE id = ?', activityId);
+  }
+
+  /**
+   * Retire un investissement saisi à la main : ses opérations saisies, ses
+   * investissements programmés et, s'il n'est plus utilisé nulle part, l'actif
+   * et ses cours. Les opérations synchronisées (courtier, wallet) sont gardées.
+   */
+  deleteAsset(instrumentId: string): { removedOperations: number } {
+    const instrument = this.#requireInstrument(instrumentId);
+    return this.#db.transaction(() => {
+      const removed = this.#db.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM activities WHERE instrument_id = ? AND provider_id = 'manual' AND raw_source_type LIKE 'manual.%'`,
+        instrument.id,
+      )?.n ?? 0;
+      this.#db.run(
+        `DELETE FROM activities WHERE instrument_id = ? AND provider_id = 'manual' AND raw_source_type LIKE 'manual.%'`,
+        instrument.id,
+      );
+      this.#db.run('DELETE FROM dca_plans WHERE instrument_id = ?', instrument.id);
+      const stillUsed = this.#db.get<{ n: number }>('SELECT COUNT(*) AS n FROM activities WHERE instrument_id = ?', instrument.id)?.n ?? 0;
+      if (stillUsed === 0) {
+        try {
+          this.#db.run('DELETE FROM quotes WHERE instrument_id = ?', instrument.id);
+          this.#db.run('DELETE FROM instruments WHERE id = ?', instrument.id);
+        } catch {
+          // Référencé ailleurs (position déclarée d'une plateforme…) : l'actif reste, sans opération saisie.
+        }
+      }
+      return { removedOperations: removed };
+    });
   }
 
   /* ================================================== investissements programmés */

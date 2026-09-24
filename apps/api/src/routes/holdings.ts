@@ -21,7 +21,7 @@ const PERIOD = z.enum(['1D', '1W', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']).defaul
 const CURRENCY = z.string().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase());
 
 const assetSchema = z.object({
-  source: z.enum(['yahoo', 'coingecko', 'manual']),
+  source: z.enum(['onvista', 'yahoo', 'coingecko', 'manual']),
   priceSymbol: z.string().min(1).max(64).optional(),
   symbol: z.string().min(1).max(32).optional(),
   name: z.string().min(1).max(160),
@@ -106,6 +106,17 @@ export async function registerHoldingsRoutes(app: FastifyInstance, deps: Holding
       }
       audit.log({ actor: 'owner', action: 'holdings.asset.add', entity: 'instrument', entityId: result.asset.instrumentId });
       return reply.code(201).send(result);
+    } catch (error) {
+      return fail(reply, error);
+    }
+  });
+
+  app.delete('/api/holdings/assets/:id', async (request, reply) => {
+    try {
+      const { id } = z.object({ id: z.string() }).parse(request.params);
+      const result = holdings.deleteAsset(id);
+      audit.log({ actor: 'owner', action: 'holdings.asset.delete', entity: 'instrument', entityId: id });
+      return reply.send({ ok: true, ...result });
     } catch (error) {
       return fail(reply, error);
     }

@@ -38,7 +38,7 @@ export function CryptoPage() {
           <>
             <Grid>
               <StatTile label="Total crypto" value={formatEur(data.totalEur)} hint={`${data.wallets.length} portefeuille(s)`} />
-              <StatTile label="Chaînes suivies" value={`${data.byChain.length}`} hint={data.byChain.map((slice) => slice.label).join(' · ')} />
+              <StatTile label="Chaînes suivies" value={`${data.byChain.length}`} hint={data.byChain.map((slice) => (slice.label === 'unknown' ? 'hors blockchain' : slice.label)).join(' · ')} />
               <StatTile label="Actifs détenus" value={`${data.allocation.length}`} hint="Jetons et stablecoins" />
             </Grid>
 
