@@ -136,18 +136,59 @@ export function GoogleLinkCard({ profile, onChanged }: { readonly profile: Profi
   );
 }
 
-/** Paramètres (propriétaire) : identifiants de l'application Google. */
+/** Paramètres (administrateur) : inscriptions ouvertes ou fermées. */
+export function RegistrationCard() {
+  const { session, refresh } = useAuth();
+  const toggle = useAction();
+  if (session?.admin !== true) return null;
+  const open = session.registrationOpen !== false;
+  return (
+    <Card
+      title="Inscriptions"
+      subtitle="Chaque personne qui s’inscrit a son propre espace, séparé du vôtre : elle ne voit jamais vos données."
+      actions={open ? <Badge tone="ok">Ouvertes</Badge> : <Badge tone="neutral">Fermées</Badge>}
+    >
+      <div className="form-stack">
+        <p className="muted small">
+          {open
+            ? 'Tout le monde peut créer un compte, par e-mail ou avec Google.'
+            : 'Seuls les comptes existants et les membres que vous invitez peuvent se connecter.'}
+        </p>
+        <div>
+          <button
+            type="button"
+            className="btn"
+            disabled={toggle.pending}
+            data-testid="registration-toggle"
+            onClick={() =>
+              void toggle.run(async () => {
+                await request('/api/auth/registration', { method: 'PUT', json: { open: !open } });
+                refresh();
+                return open ? 'Inscriptions fermées.' : 'Inscriptions ouvertes.';
+              })
+            }
+          >
+            {open ? 'Fermer les inscriptions' : 'Ouvrir les inscriptions'}
+          </button>
+        </div>
+        <ActionFeedback state={toggle} />
+      </div>
+    </Card>
+  );
+}
+
+/** Paramètres (administrateur) : identifiants de l'application Google. */
 export function GoogleConfigCard() {
   const { session } = useAuth();
   const config = useAsync<GoogleConfigResponse | null>(
-    async (signal) => (session?.role === 'OWNER' ? request<GoogleConfigResponse>('/api/auth/google/config', { signal }) : null),
-    [session?.role],
+    async (signal) => (session?.admin === true ? request<GoogleConfigResponse>('/api/auth/google/config', { signal }) : null),
+    [session?.admin],
   );
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const save = useAction();
   const remove = useAction();
-  if (session?.role !== 'OWNER' || config.data === null || config.data === undefined) return null;
+  if (session?.admin !== true || config.data === null || config.data === undefined) return null;
   const data = config.data;
   return (
     <Card
@@ -220,8 +261,8 @@ export function GoogleConfigCard() {
           <ActionFeedback state={save} />
           <ActionFeedback state={remove} />
           <p className="muted small">
-            Sécurité : seuls vous et les personnes invitées par leur adresse e-mail (Profil → Membres) peuvent se connecter.
-            Un compte Google inconnu est refusé.
+            Un nouveau compte Google reçoit son propre espace, vide et privé (si les inscriptions sont ouvertes) ; il ne voit
+            jamais vos données.
           </p>
         </div>
       )}

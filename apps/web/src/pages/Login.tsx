@@ -9,7 +9,7 @@ import { PasswordField, TextField } from '../components/ui/Fields.tsx';
 import { IconArrowLeft, IconMail } from '../components/ui/Icons.tsx';
 import { GoogleButton, GoogleOutcome, useGoogleEnabled, useGoogleOutcome } from '../components/security/GoogleSignIn.tsx';
 
-type Mode = 'login' | 'forgot' | 'code' | 'sent';
+type Mode = 'login' | 'forgot' | 'code' | 'sent' | 'register';
 
 /**
  * Écrans d'accès :
@@ -245,6 +245,10 @@ function SignInFlow({ onCode }: { readonly onCode: (code: string) => void }) {
     </button>
   );
 
+  if (mode === 'register') {
+    return <RegisterForm onCode={onCode} onBack={() => go('login')} googleEnabled={googleEnabled} />;
+  }
+
   if (mode === 'sent') {
     return (
       <div className="login-card">
@@ -386,6 +390,11 @@ function SignInFlow({ onCode }: { readonly onCode: (code: string) => void }) {
       <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={pending || password === ''}>
         {pending ? 'Connexion…' : 'Se connecter'}
       </button>
+      {session?.registrationOpen === true && (
+        <button type="button" className="btn btn-ghost btn-lg btn-block" data-testid="open-register" onClick={() => go('register')}>
+          Créer un compte
+        </button>
+      )}
       <div className="login-links">
         <button
           type="button"
@@ -397,6 +406,108 @@ function SignInFlow({ onCode }: { readonly onCode: (code: string) => void }) {
         </button>
         <DemoLink />
       </div>
+    </form>
+  );
+}
+
+/* ------------------------------------------------------------- inscription */
+
+function RegisterForm({
+  onCode,
+  onBack,
+  googleEnabled,
+}: {
+  readonly onCode: (code: string) => void;
+  readonly onBack: () => void;
+  readonly googleEnabled: boolean;
+}) {
+  const { register } = useAuth();
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mismatch = confirm !== '' && password !== confirm;
+
+  const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (password !== confirm) {
+      setError('Les deux mots de passe ne sont pas identiques.');
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const result = await register({
+        email: email.trim(),
+        password,
+        displayName: displayName.trim() === '' ? null : displayName.trim(),
+      });
+      onCode(result.recoveryCode);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <form className="login-card" onSubmit={(event) => void submit(event)} data-testid="register-form">
+      <AuthBrand />
+      <button type="button" className="btn btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={onBack}>
+        <IconArrowLeft size={18} /> Retour
+      </button>
+      <h1 className="login-title">Créer un compte</h1>
+      <p className="login-lead">Votre espace est personnel : personne d’autre ne voit vos données.</p>
+      {googleEnabled && (
+        <>
+          <GoogleButton label="S’inscrire avec Google" />
+          <div className="login-divider">ou avec votre e-mail</div>
+        </>
+      )}
+      <TextField label="Prénom ou nom (facultatif)" value={displayName} onChange={setDisplayName} autoComplete="name" />
+      <TextField
+        label="E-mail"
+        type="email"
+        value={email}
+        onChange={setEmail}
+        autoComplete="email"
+        data-testid="register-email"
+        required
+        hint="Il sert à vous connecter et à récupérer votre accès. Stocké chiffré."
+      />
+      <PasswordField
+        label="Mot de passe"
+        value={password}
+        onChange={setPassword}
+        autoComplete="new-password"
+        data-testid="register-password"
+        showStrength
+        required
+      />
+      <PasswordField
+        label="Confirmer le mot de passe"
+        value={confirm}
+        onChange={setConfirm}
+        autoComplete="new-password"
+        data-testid="register-confirm"
+        required
+      />
+      {mismatch && <p className="feedback feedback-error">Les deux mots de passe ne sont pas identiques.</p>}
+      {error !== null && (
+        <p className="feedback feedback-error" role="alert">
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        className="btn btn-primary btn-lg btn-block"
+        data-testid="register-submit"
+        disabled={pending || email.trim() === '' || password.length < MIN_PASSWORD_LENGTH || password !== confirm}
+      >
+        {pending ? 'Création…' : 'Créer mon compte'}
+      </button>
     </form>
   );
 }

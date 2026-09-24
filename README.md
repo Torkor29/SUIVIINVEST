@@ -659,19 +659,29 @@ les deux adresses à déclarer.
 3. Copiez l'**ID client** et le **code secret** dans Paramètres → *Activer*. (Ou dans `.env` :
    `SUIVIINVEST_GOOGLE_CLIENT_ID` et `SUIVIINVEST_GOOGLE_CLIENT_SECRET`.)
 
-**Qui peut entrer** — le patrimoine est commun à tous les comptes, l'inscription n'est donc pas
-ouverte à n'importe quel compte Google :
-
-- au premier lancement, « Créer mon compte avec Google » crée le compte **propriétaire** ;
-- un compte existant dont l'e-mail correspond (ou lié depuis Profil → *Lier mon compte Google*) ;
-- une personne **invitée** : Profil → Membres → cocher « Connexion avec Google, sans mot de
-  passe » et saisir son adresse Google ;
-- tout autre compte Google est **refusé** (« demandez une invitation »).
+**Qui peut entrer** : tout le monde, comme sur n'importe quel site, si les inscriptions sont
+ouvertes (Paramètres → *Inscriptions*, ouvertes par défaut). Voir « Inscription et espaces
+séparés » ci-dessous : chaque nouveau compte a son propre espace, invisible des autres.
 
 Sécurité : flux OpenID Connect avec PKCE, demande à usage unique liée au navigateur (cookie),
 jeton d'identité vérifié sur le serveur (signature Google, application, expiration, e-mail
 confirmé). Aucun jeton d'accès Google n'est conservé. Un compte créé via Google peut définir un
 mot de passe plus tard (Profil) ; délier Google n'est possible qu'une fois ce mot de passe défini.
+
+### Inscription et espaces séparés
+
+- **Créer un compte** (e-mail + mot de passe) ou **S'inscrire avec Google** depuis l'écran de
+  connexion : la personne reçoit **son propre espace**, vide. Ses données sont dans une base à part
+  (`/data/tenants/<id>.db`) : elle ne voit jamais celles des autres, et personne ne voit les siennes.
+- L'**espace principal** (celui d'avant) reste le vôtre : vous, l'administrateur, et les membres
+  que vous invitez (Profil → Membres) partagez le même patrimoine. Une personne inscrite peut, elle
+  aussi, inviter des membres dans *son* espace.
+- Réservé à l'administrateur (propriétaire de l'espace principal) : ouvrir ou fermer les
+  inscriptions, régler Google, voir l'état du serveur.
+- Synchronisations, cours, achats programmés et sauvegardes tournent pour chaque espace
+  (sauvegardes des espaces : `backups/tenants/<id>/`, chiffrées comme les autres).
+- Isolement vérifié par des tests : même en devinant l'identifiant d'une donnée d'un autre espace,
+  la réponse est « introuvable ».
 
 ### Mot de passe oublié
 

@@ -89,6 +89,8 @@ function bodyField<T>(body: unknown, field: string, fallback: T): T {
 function mockSession(authenticated: boolean): SessionResponse {
   return {
     authenticated,
+    admin: authenticated,
+    registrationOpen: false,
     csrfToken: authenticated ? MOCK_CSRF_TOKEN : null,
     needsSetup: false,
     username: 'proprietaire',

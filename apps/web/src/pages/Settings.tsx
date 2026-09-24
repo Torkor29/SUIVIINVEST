@@ -7,9 +7,10 @@ import { useAction } from '../lib/useAction.ts';
 import { ActionFeedback } from '../components/ui/ActionFeedback.tsx';
 import { formatDate, formatRelative, formatUptime } from '../lib/format.ts';
 import { useTheme } from '../lib/useTheme.ts';
+import { useAuth } from '../lib/auth.tsx';
 import type { ThemeChoice } from '../lib/theme.ts';
 import { PageHeader, Card, Grid } from '../components/ui/Card.tsx';
-import { GoogleConfigCard } from '../components/security/GoogleSignIn.tsx';
+import { GoogleConfigCard, RegistrationCard } from '../components/security/GoogleSignIn.tsx';
 import { AsyncView } from '../components/ui/AsyncView.tsx';
 import { SkeletonLines } from '../components/ui/Skeleton.tsx';
 import { KeyValue, Badge } from '../components/ui/Stat.tsx';
@@ -23,6 +24,7 @@ const THEMES: readonly { readonly value: ThemeChoice; readonly label: string }[]
 
 /** Paramètres : apparence, cours de bourse, sauvegardes, sécurité et état du serveur. */
 export function SettingsPage() {
+  const { session } = useAuth();
   const theme = useTheme();
   const [mock, setMock] = useState<boolean>(() => isMockEnabled());
   const state = useAsync<SettingsDto>((signal) => request<SettingsDto>('/api/settings', { signal }), []);
@@ -141,6 +143,7 @@ export function SettingsPage() {
                 <ActionFeedback state={backup} />
               </Card>
 
+              <RegistrationCard />
               <GoogleConfigCard />
 
               <Card title="Sécurité" subtitle="Ce qui protège vos données sur le serveur.">
@@ -170,6 +173,7 @@ export function SettingsPage() {
               </Card>
             </Grid>
 
+            {session?.admin === true && (
             <Card title="Serveur">
               {health.data === null ? (
                 <SkeletonLines lines={3} />
@@ -196,6 +200,7 @@ export function SettingsPage() {
                 </div>
               )}
             </Card>
+            )}
           </>
         )}
       </AsyncView>

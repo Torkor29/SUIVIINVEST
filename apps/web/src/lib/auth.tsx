@@ -9,6 +9,8 @@ export interface AuthContextValue {
   readonly refresh: () => void;
   readonly login: (password: string, username?: string | null) => Promise<void>;
   readonly setup: (input: SetupInput) => Promise<{ recoveryCode: string }>;
+  /** Inscription libre : son propre espace (la session s'ouvre après le code de secours). */
+  readonly register: (input: RegisterInput) => Promise<{ recoveryCode: string }>;
   readonly logout: () => Promise<void>;
 }
 
@@ -17,6 +19,12 @@ export interface SetupInput {
   readonly username?: string | null;
   readonly displayName?: string | null;
   readonly email?: string | null;
+}
+
+export interface RegisterInput {
+  readonly email: string;
+  readonly password: string;
+  readonly displayName?: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -80,6 +88,19 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     [],
   );
 
+  const register = useCallback(async (input: RegisterInput): Promise<{ recoveryCode: string }> => {
+    const result = await request<SessionResponse & { recoveryCode: string }>('/api/auth/register', {
+      method: 'POST',
+      json: {
+        email: input.email,
+        password: input.password,
+        ...(input.displayName ? { displayName: input.displayName } : {}),
+      },
+    });
+    if (result.csrfToken !== null) setCsrfToken(result.csrfToken);
+    return { recoveryCode: result.recoveryCode };
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await request<SessionResponse>('/api/auth/logout', { method: 'POST' });
@@ -91,8 +112,8 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ session, loading, error, refresh: () => void load(), login, setup, logout }),
-    [session, loading, error, load, login, setup, logout],
+    () => ({ session, loading, error, refresh: () => void load(), login, setup, register, logout }),
+    [session, loading, error, load, login, setup, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
